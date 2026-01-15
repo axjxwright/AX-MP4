@@ -17,6 +17,7 @@
 
 #include "hap.h"
 #include <iostream>
+#include "circular/circular.h"
 
 namespace ui = ImGui;
 
@@ -25,6 +26,11 @@ using namespace ci::app;
 
 #if AX_LIVEPP_ENABLED
 #include "LPP_API_x64_CPP.h"
+
+extern "C"
+{
+    __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x1;
+}
 
 namespace AX
 {
@@ -98,6 +104,8 @@ protected:
     AX::TrackRef    _track{ nullptr };
     float           _playRate{ 0.0f };
     float           _time{ 0 };
+    
+    circular_buffer<float>  _decodeTimeHistory{ 64 };
 };
 
 void SimpleHAPDecoderApp::setup ( )
@@ -174,7 +182,7 @@ void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
     LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
 }
 
-static uint32_t kHAP1 = AX_FOURCC ( 'H', 'a', 'p', '1' );
+static uint32_t kHAP1 = 'Hap1'; // AX_FOURCC ( 'H', 'a', 'p', '1' );
 static uint32_t kHAP5 = AX_FOURCC ( 'H', 'a', 'p', '5' );
 static uint32_t kJPEG = AX_FOURCC ( 'j', 'p', 'e', 'g' );
 
@@ -183,6 +191,8 @@ gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
     AX::Sample sample{};
     if ( _track && _track->ReadSample ( index, sample ) )
     {
+        Timer timer{ true };
+
         std::printf ( "read sample %d %lu (%s)\n", index, sample.Length ( ), AX::FourCCToString ( sample.Handler ( ) ).c_str ( ) );
 
         if ( sample.Handler ( ) == kJPEG )
@@ -191,6 +201,7 @@ gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
             {
                 auto stream = IStreamMem::create ( sample.Data ( ), sample.Length ( ) );
                 auto image = loadImage ( DataSourceBuffer::create ( loadStreamBuffer ( stream ) ), ImageSource::Options ( ), "jpg" );
+                _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
                 return gl::Texture::create ( image, gl::Texture::Format ( ).label ( AX::FourCCToString ( sample.Handler ( ) ) ) );
             } catch ( const std::exception& e )
             {
@@ -262,6 +273,9 @@ gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
 
                     if ( glFormat != 0 )
                     {
+                        // Don't include GL time in measurement;
+                        _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
+
                         GLuint texId{ 0 };
                         GLenum target = GL_TEXTURE_2D;
 
@@ -308,8 +322,10 @@ void SimpleHAPDecoderApp::draw ( )
 {
     gl::clear ( Colorf ( 1.0f, 0.0f, 0.0f ) );
     {
+        static auto kRenderer = gl::getString ( GL_RENDERER );
+
         ui::ScopedWindow window{ "Settings" };
-        ui::Text ( "AX MP4 Parser Test | FPS %.2f", getAverageFps ( ) );
+        ui::Text ( "AX MP4 Parser Test | FPS %.2f | %s", getAverageFps ( ), kRenderer.c_str() );
 
         if ( _track )
         {
@@ -334,6 +350,23 @@ void SimpleHAPDecoderApp::draw ( )
                     _time = (float)sample / ( (float)_track->SampleCount ( ) - 1 ) * _track->DurationSeconds ( );
                 }
             }
+        }
+
+        if ( !_decodeTimeHistory.empty() )
+        {
+            std::vector<float> samples{};
+            samples.reserve ( _decodeTimeHistory.size ( ) );
+
+            float avg = 0.0f;
+            for ( auto& sample : _decodeTimeHistory )
+            {
+                avg += sample;
+                samples.push_back ( sample );
+            }
+
+            avg /= static_cast<float> ( _decodeTimeHistory.size ( ) );
+            ui::Text ( "Average Decode Time(s): %.4f", avg );
+            ui::PlotLines ( "##", samples.data ( ), samples.size ( ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
         }
 
         if ( _mp4 ) Inspect ( _mp4.get ( ) );
