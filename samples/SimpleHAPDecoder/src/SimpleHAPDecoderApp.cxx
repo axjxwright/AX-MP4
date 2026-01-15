@@ -88,16 +88,16 @@ public:
 
 protected:
 
-    bool                            LoadMP4       ( const DataSourceRef& source );
-    gl::TextureRef                  DecodeFrameAt ( int index );
+    bool            LoadMP4       ( const DataSourceRef& source );
+    gl::TextureRef  DecodeFrameAt ( int index );
 
-    int                             _currentSample{ 0 };
-    gl::TextureRef                  _frame;
-    AX::MP4Ref                      _mp4;
-    AX::MovieRef                    _movie;
-    AX::TrackRef                    _track{ nullptr };
-    float                           _playRate{ 0.0f };
-    float                           _time{ 0 };
+    int             _currentSample{ 0 };
+    gl::TextureRef  _frame;
+    AX::MP4Ref      _mp4;
+    AX::MovieRef    _movie;
+    AX::TrackRef    _track{ nullptr };
+    float           _playRate{ 0.0f };
+    float           _time{ 0 };
 };
 
 void SimpleHAPDecoderApp::setup ( )
