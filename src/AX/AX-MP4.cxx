@@ -351,6 +351,7 @@ namespace AX
 
     void MDATAtom::Parse ( MP4&, const IStreamRef& stream, usz expectedLength )
     {
+        _offsetFromStartOfFile = stream->tell ( );
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
@@ -478,15 +479,12 @@ namespace AX
             stream->readBig<u32> ( &_chunkCount );
 
             _chunkOffsets.resize ( _chunkCount );
-            int offsetFromStartOfFile = 0;
-
+            
             for ( u32 i = 0; i < _chunkCount; i++ )
             {
                 u32 offset{ 0 };
                 stream->readBig<u32> ( &offset );
-                if ( i == 0 ) offsetFromStartOfFile = offset;
-                offset -= offsetFromStartOfFile;
-
+                
                 _chunkOffsets[i] = offset;
             }
         }
@@ -549,9 +547,9 @@ namespace AX
 
             if ( _chunks[group].SamplesPerChunk == 0 ) return false;
             
-            u32 chunk_offset = ( ( sample - _chunks[group].FirstSample ) / _chunks[group].SamplesPerChunk );
-            chunk = _chunks[group].FirstChunk + chunk_offset;
-            skip = sample - ( _chunks[group].FirstSample + _chunks[group].SamplesPerChunk * chunk_offset );
+            u32 chunkOffset = ( ( sample - _chunks[group].FirstSample ) / _chunks[group].SamplesPerChunk );
+            chunk = _chunks[group].FirstChunk + chunkOffset;
+            skip = sample - ( _chunks[group].FirstSample + _chunks[group].SamplesPerChunk * chunkOffset );
             desc = _chunks[group].SampleDescIndex;
 
             return true;
@@ -889,7 +887,7 @@ namespace AX
        
         if ( auto mdat = _mdat.lock ( ) )
         {
-            sample = Sample ( handler, mdat->Data ( ) + offset, sampleSize );
+            sample = Sample ( handler, mdat->DataWithOffset ( offset ), sampleSize );
             return true;
         }
         

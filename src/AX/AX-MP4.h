@@ -486,16 +486,18 @@ namespace AX
     class MDATAtom : public Atom
     {
     public:
-        AtomType    Type ( ) const override { return AtomType::kMDAT; }
-        void        Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
+        AtomType            Type ( ) const override { return AtomType::kMDAT; }
+        void                Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
 
-        const u8 *  Data ( ) const { return _stream ? reinterpret_cast<const u8 *>( _stream->getData()) : _data.data(); }
-        usz         DataSize ( ) const { return _stream ? _stream->size ( ) : _data.size ( ); }
-        bool        OwnsMemory ( ) const { return _stream != nullptr; }
+        const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>( _stream->getData()) : _data.data(); }
+        const u8 *          DataWithOffset ( off_t offset ) { return Data ( ) + offset - _offsetFromStartOfFile; }
+        usz                 DataSize ( ) const { return _stream ? _stream->size ( ) : _data.size ( ); }
+        bool                OwnsMemory ( ) const { return _stream != nullptr; }
 
     protected:
         std::vector<u8>     _data;
         ci::IStreamMemRef   _stream;
+        u32                 _offsetFromStartOfFile{ 0 };
     };
 
     using STSDAtomRef = std::shared_ptr<class STSDAtom>;

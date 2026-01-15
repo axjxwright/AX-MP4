@@ -120,7 +120,8 @@ void SimpleHAPDecoderApp::setup ( )
     {
         // Sample HAP videos downloadable from
         // https://docs.vidvox.net/vdmx/vdmx_sample_media.html#momo-the-monster-middlman-pacific-coast
-        LoadMP4 ( loadAsset ( "Videos/Drums_Fill1_BG.mov" ) );
+        //LoadMP4 ( loadAsset ( "Videos/Drums_Fill1_BG.mov" ) );
+        LoadMP4 ( loadFile ( "C:\\Dev\\Projects\\hap-mp4\\assets\\b.mov" ) );
     } else
     {
         std::printf ( "No demo video found\n" );
