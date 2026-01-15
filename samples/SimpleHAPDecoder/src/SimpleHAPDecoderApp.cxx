@@ -24,13 +24,13 @@ namespace ui = ImGui;
 using namespace ci;
 using namespace ci::app;
 
-#if AX_LIVEPP_ENABLED
-#include "LPP_API_x64_CPP.h"
-
 extern "C"
 {
     __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x1;
 }
+
+#if AX_LIVEPP_ENABLED
+#include "LPP_API_x64_CPP.h"
 
 namespace AX
 {

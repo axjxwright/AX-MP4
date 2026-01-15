@@ -656,6 +656,21 @@ namespace AX
         return false;
     }
 
+    void ESDSAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
+    {
+        off_t delta{ 0 };
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            FullAtom::Parse ( context, stream, 4 );
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+            }
+        }
+        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+    }
+
     const char * MP4ErrorCodeToString ( MP4ErrorCode code )
     {
         static std::unordered_map<MP4ErrorCode, const char *> kTable =
@@ -717,6 +732,7 @@ namespace AX
         RegisterAtomFactory ( AtomType::kMETA, [=] { return std::make_shared<FullAtom> ( AtomType::kMETA ); } );
         RegisterAtomFactory ( AtomType::kHDLR, [=] { return std::make_shared<HDLRAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kMDHD, [=] { return std::make_shared<MDHDAtom> ( ); } );
+        RegisterAtomFactory ( AtomType::kESDS, [=] { return std::make_shared<ESDSAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kPITM, [=] { return std::make_shared<FullAtom> ( AtomType::kPITM ); } );
         RegisterAtomFactory ( AtomType::kIINF, [=] { return std::make_shared<FullAtom> ( AtomType::kIINF ); } );
         RegisterAtomFactory ( AtomType::kDREF, [=] { return std::make_shared<FullAtom> ( AtomType::kDREF ); } );
@@ -972,11 +988,11 @@ namespace AX
         if ( skip > index ) return false;
 
         u64 offset{ 0 };
-        u32 offset_32{ 0 };
+        u32 offset32{ 0 };
 
         auto stco = _stco.lock ( );
-        if ( !stco->GetChunkOffset ( chunk, offset_32 ) ) return false;
-        offset = offset_32;
+        if ( !stco->GetChunkOffset ( chunk, offset32 ) ) return false;
+        offset = offset32;
         
         auto stsz = _stsz.lock ( );
         for ( u32 i = index - skip; i < index; i++ ) 
