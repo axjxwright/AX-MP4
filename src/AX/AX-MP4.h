@@ -705,8 +705,12 @@ namespace AX
         kSubtitles
     };
 
+    ///
+    /// Convenience Playback API
+    /// 
+    
     using TrackRef          = std::shared_ptr<class Track>;
-    class Track            : public std::enable_shared_from_this<Track>
+    class Track             : public std::enable_shared_from_this<Track>
     {
     public:
         Track               ( const MDATAtomRef& mdat, const ContainerAtomRef& trak );
