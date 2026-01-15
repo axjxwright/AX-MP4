@@ -1,0 +1,6 @@
+[submodule "samples/SimpleHAPDecoder/lib/hap"]
+	path = samples/SimpleHAPDecoder/lib/hap
+	url = https://github.com/vidvox/hap
+[submodule "samples/SimpleHAPDecoder/lib/snappy"]
+	path = samples/SimpleHAPDecoder/lib/snappy
+	url = https://github.com/google/snappy
