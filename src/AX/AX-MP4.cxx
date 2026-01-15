@@ -564,6 +564,26 @@ namespace AX
         return false;
     }
 
+    const char * MP4ErrorCodeToString ( MP4ErrorCode code )
+    {
+        static std::unordered_map<MP4ErrorCode, const char *> kTable =
+        {
+            { MP4ErrorCode::Success, "Success" },
+            { MP4ErrorCode::InvalidHeader, "Invalid Header" },
+            { MP4ErrorCode::Unknown, "Unknown" },
+        };
+
+        auto it = kTable.find ( code );
+        if ( it != kTable.end ( ) )
+        {
+            return it->second;
+        } else
+        {
+            static const char * kNull = "Unknown Error";
+            return kNull;
+        }
+    }
+
     MP4Ref MP4::Create ( const fs::path& path )
     {
         if ( !fs::exists ( path ) ) return nullptr;
@@ -572,14 +592,12 @@ namespace AX
 
     MP4Ref MP4::Create ( const DataSourceRef& source )
     {
-        try
+        if ( auto mp4 = MP4Ref ( new MP4 ( source ) ) )
         {
-            auto mp4 = MP4Ref ( new MP4 ( source ) );
             return mp4;
-        } catch ( const std::exception& )
-        {
-            return nullptr;
         }
+
+        return nullptr;
     }
 
     MP4::MP4 ( const DataSourceRef& source )
@@ -636,12 +654,51 @@ namespace AX
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
         RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kAVC1 ); } );
 
-        _buffer = source->getBuffer ( );
-        u64 streamSize = _buffer->getSize ( );
-        auto stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
+        try
+        {
+            _buffer = source->getBuffer ( );
+            u64 streamSize = _buffer->getSize ( );
+            auto stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
 
-        Parse ( *this, stream, streamSize );
-        assert ( _stack.empty ( ) && "MP4 ContainerAtom stack underflow" );
+            if ( !StartsWithFTYP ( ) )
+            {
+                _error = MP4ErrorCode::InvalidHeader;
+                return;
+            }
+
+            Parse ( *this, stream, streamSize );
+            assert ( _stack.empty ( ) && "MP4 ContainerAtom stack underflow" );
+
+            _isValid = true;
+        } catch ( const std::exception& e )
+        {
+            _error = MP4ErrorCode::Unknown;
+        }
+    }
+
+    bool MP4::StartsWithFTYP ( ) const
+    {
+        const u32 kHeaderSize = 2 * sizeof ( u32 );
+     
+        if ( !_buffer ) return false;
+        if ( _buffer->getSize ( ) < kHeaderSize ) return false;
+
+        try
+        {
+            auto stream = IStreamMem::create ( _buffer->getData ( ), kHeaderSize );
+
+            u32 length{};
+            stream->readBig<u32> ( &length );
+            if ( length < 4 * sizeof ( u32 ) ) return false;
+
+            AtomType type{ AtomType::kUNKN };
+            stream->readBig<u32> ( (u32*)&type );
+
+            return type == AtomType::kFTYP;
+        } catch ( const std::exception& e )
+        {
+            return false;
+        }
     }
 
     AtomRef MP4::CreateAtom ( AtomType type )

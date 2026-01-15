@@ -88,6 +88,7 @@ public:
 
 protected:
 
+    bool                            LoadMP4       ( const DataSourceRef& source );
     gl::TextureRef                  DecodeFrameAt ( int index );
 
     int                             _currentSample{ 0 };
@@ -107,17 +108,46 @@ void SimpleHAPDecoderApp::setup ( )
     ui::Initialize ( );
     AX::InitLivePP ( );
     
+    if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
-        _mp4 = AX::MP4::Create ( loadAsset ( "Videos/Drums_Fill1_BG.mov"  ) );
+        // Sample HAP videos downloadable from
+        // https://docs.vidvox.net/vdmx/vdmx_sample_media.html#momo-the-monster-middlman-pacific-coast
+        LoadMP4 ( loadAsset ( "Videos/Drums_Fill1_BG.mov" ) );
+    } else
+    {
+        std::printf ( "No demo video found\n" );
+    }
+}
+
+bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
+{
+    try
+    {
+        _mp4 = AX::MP4::Create ( source );
         if ( _mp4 )
         {
-            _movie = AX::Movie::Create ( _mp4 );
-            _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
-            _mp4->Dump ( std::cout );
+            if ( _mp4->IsValid ( ) )
+            {
+                _movie = AX::Movie::Create ( _mp4 );
+                _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
+                _mp4->Dump ( std::cout );
+
+                _currentSample = 0;
+                _time = 0.0f;
+
+                _frame = DecodeFrameAt ( 0 );
+                return true;
+            } else
+            {
+                std::printf ( "Error loading MP4: %s\n", AX::MP4ErrorCodeToString ( _mp4->Error ( ) ) );
+            }
         }
+    } catch ( const std::exception& e )
+    {
+        std::printf ( "Error loading MP4: %s\n", e.what ( ) );
     }
 
-    _frame = DecodeFrameAt ( 0 );
+    return false;
 }
 
 void SimpleHAPDecoderApp::update ( )
@@ -141,17 +171,7 @@ void SimpleHAPDecoderApp::update ( )
 
 void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
 {
-    _mp4 = AX::MP4::Create ( loadFile ( event.getFile ( 0 ) ) );
-    if ( _mp4 )
-    {
-        _movie = AX::Movie::Create ( _mp4 );
-        _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
-        _mp4->Dump ( std::cout );
-    }
-        
-    _currentSample = 0;
-    _time = 0.0f;
-    _frame = DecodeFrameAt ( 0 );
+    LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
 }
 
 static uint32_t kHAP1 = AX_FOURCC ( 'H', 'a', 'p', '1' );
@@ -161,7 +181,7 @@ static uint32_t kJPEG = AX_FOURCC ( 'j', 'p', 'e', 'g' );
 gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
 {
     AX::Sample sample{};
-    if ( _track->ReadSample ( index, sample ) )
+    if ( _track && _track->ReadSample ( index, sample ) )
     {
         std::printf ( "read sample %d %lu (%s)\n", index, sample.Length ( ), AX::FourCCToString ( sample.Handler ( ) ).c_str ( ) );
 

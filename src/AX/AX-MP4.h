@@ -600,6 +600,15 @@ namespace AX
 
     using AtomFactoryFn = std::function<AtomRef()>;
 
+    enum class MP4ErrorCode
+    {
+        Success,
+        InvalidHeader, // Doesn't start with FTYP atom
+        Unknown
+    };
+
+    const char * MP4ErrorCodeToString ( MP4ErrorCode code );
+    
     using MP4Ref = std::shared_ptr<class MP4>;
     class MP4 : public FileAtom
     {
@@ -609,27 +618,31 @@ namespace AX
         static MP4Ref               Create ( const ci::fs::path& path );
         static MP4Ref               Create ( const ci::DataSourceRef& source );
 
-        AtomRef                     CreateAtom ( AtomType type );
+        AtomRef                     CreateAtom  ( AtomType type );
+        void                        Dump        ( std::ostream& stream ) const;
         
         // @note(andrew): -1 to Ignore self
-        u32                         StackDepth ( ) const { return static_cast<u32>(_stack.size ( )) - 1; } 
-        const ci::BufferRef&        Buffer ( ) const { return _buffer; }
-        
-        void                        Dump ( std::ostream& stream ) const;
-
+        u32                         StackDepth  ( ) const { return static_cast<u32>(_stack.size ( )) - 1; } 
+        const ci::BufferRef&        Buffer      ( ) const { return _buffer; }
+        bool                        IsValid     ( ) const { return _isValid; }
+        MP4ErrorCode                Error       ( ) const { return _error; }
+    
     protected:
-
         MP4                         ( const ci::DataSourceRef& source );
         using FactoryMap            = std::unordered_map<AtomType, AtomFactoryFn>;
         
+        bool                        StartsWithFTYP ( ) const;
+
         void                        RegisterAtomFactory ( AtomType type, AtomFactoryFn fn );
         void                        Push ( ContainerAtom* atom );
         void                        Pop ( );
 
         ContainerAtom*              Top ( ) const;
         
+        bool                        _isValid{ false };
         ci::BufferRef               _buffer;
         std::stack<ContainerAtom *> _stack;
+        MP4ErrorCode                _error{ MP4ErrorCode::Unknown };
         FactoryMap                  _factories;
     };
 

@@ -16,4 +16,6 @@ $ start SimpleHAPDecoderApp.sln
 
 This is a far from exhaustive implementation, only the atoms I needed to get the demo working have been implemented, but it's trivial to add new ones as they become necessary.
 
+The videos tested were downloaded from the [vidvox sample media](https://docs.vidvox.net/vdmx/vdmx_sample_media.html#momo-the-monster-middlman-pacific-coast) website.
+
 Lots of inspiration drawn from [ISOBMFF](https://github.com/DigiDNA/ISOBMFF) during development.
