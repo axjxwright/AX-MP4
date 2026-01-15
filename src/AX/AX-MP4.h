@@ -34,6 +34,7 @@ namespace AX
 
     using usz = std::size_t;
 
+    // @FIXME(andrew): Can probably just use 'xxxx' literals for these
     enum class AtomType : u32
     {
         // @note(andrew): These are internal to us.
@@ -261,8 +262,9 @@ namespace AX
     class Atom      : public std::enable_shared_from_this<Atom>
     {
     public:
-        // @TODO(andrew) Bit gross
+        // @FIXME(andrew): Bit gross
         friend class ContainerAtom;
+        using PropertyMap   = std::unordered_map<std::string, std::string>;
 
         struct AtomInfo
         {
@@ -270,14 +272,15 @@ namespace AX
             usz Size{};
         };
 
-        virtual ~Atom ( ) {};
+        virtual ~Atom ( )   {};
         virtual AtomType    Type ( ) const = 0;
         
-        virtual void        Parse ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) = 0;
+        virtual void        Parse       ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) = 0;
         virtual bool        IsContainer ( ) const { return false; }
-        virtual bool        IsFull ( ) const { return false; }
-        const AtomInfo&     Info  ( ) const { return _info; }
-        virtual std::string ToString ( ) const;
+        virtual bool        IsFull      ( ) const { return false; }
+        const AtomInfo&     Info        ( ) const { return _info; }
+        const PropertyMap&  Properties  ( ) const { return _properties; }
+        virtual std::string ToString    ( ) const;
 
         template <typename T>
         std::shared_ptr<const T> As ( ) const { return std::static_pointer_cast<T> ( shared_from_this ( ) ); }
@@ -294,10 +297,24 @@ namespace AX
         template <typename T>
         bool Is ( ) const { return TryCast<T> ( ) != nullptr; }
 
+        template <typename T>
+        void WriteProperty ( const std::string& name, const T& value )
+        {
+            _properties[name] = std::to_string ( value );
+        }
+
+        template <>
+        void WriteProperty ( const std::string& name, const std::string& value )
+        {
+            _properties[name] = value;
+        }
+
     protected:
 
         void        SetInfo ( const AtomInfo& info ) { _info = info; }
+        
         AtomInfo    _info{ 0 };
+        PropertyMap _properties{};
     };
 
     using ContainerAtomRef = std::shared_ptr<class ContainerAtom>;
@@ -615,22 +632,31 @@ namespace AX
     class MP4 : public FileAtom
     {
     public:
+        struct Format
+        {
+            Format& TrackProperties  ( bool track = true ) { _trackProperties = track; return *this; }
+            bool    TracksProperties ( ) const { return _trackProperties; };
+        protected:
+            bool    _trackProperties{ false };
+        };
+
         friend class ContainerAtom;
         
-        static MP4Ref               Create ( const ci::fs::path& path );
-        static MP4Ref               Create ( const ci::DataSourceRef& source );
+        static MP4Ref               Create ( const ci::fs::path& path, const Format& format = Format() );
+        static MP4Ref               Create ( const ci::DataSourceRef& source, const Format& format = Format() );
 
         AtomRef                     CreateAtom  ( AtomType type );
-        void                        Dump        ( std::ostream& stream ) const;
+        void                        Dump        ( std::ostream& stream, bool verbose = false ) const;
         
         // @note(andrew): -1 to Ignore self
         u32                         StackDepth  ( ) const { return static_cast<u32>(_stack.size ( )) - 1; } 
         const ci::BufferRef&        Buffer      ( ) const { return _buffer; }
         bool                        IsValid     ( ) const { return _isValid; }
         MP4ErrorCode                Error       ( ) const { return _error; }
-    
+        const Format&               Settings    ( ) const { return _format; }
+        
     protected:
-        MP4                         ( const ci::DataSourceRef& source );
+        MP4                         ( const ci::DataSourceRef& source, const Format& format );
         using FactoryMap            = std::unordered_map<AtomType, AtomFactoryFn>;
         
         bool                        StartsWithFTYP ( ) const;
@@ -646,6 +672,7 @@ namespace AX
         std::stack<ContainerAtom *> _stack;
         MP4ErrorCode                _error{ MP4ErrorCode::Unknown };
         FactoryMap                  _factories;
+        Format                      _format;
     };
 
     class Sample

@@ -155,13 +155,19 @@ namespace AX
         return children;
     }
     
-    void FullAtom::Parse ( MP4 &, const IStreamRef & stream, usz expectedLength )
+    void FullAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
     {
         u32 header{ };
         stream->readBig<u32> ( &header );
         
         _version = ( header >> 24 ) & 0x000000FF;
         _flags   = ( header       ) & 0x00FFFFFF;
+
+        if ( context.Settings ( ).TracksProperties ( ) )
+        {
+            WriteProperty ( "version", _version );
+            WriteProperty ( "flags", _flags );
+        }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - sizeof ( u32 ) ) );
     }
@@ -174,7 +180,7 @@ namespace AX
         }
     }
     
-    void FTYPAtom::Parse ( MP4 &, const IStreamRef & stream, usz expectedLength )
+    void FTYPAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
     {
         std::string brand{ 4, 0 };
         stream->readFixedString ( &brand, 4 );
@@ -195,6 +201,13 @@ namespace AX
                 expectedLength -= 4;
                 compatibleBrands.push_back ( compat );
             }
+        }
+
+        if ( context.Settings ( ).TracksProperties ( ) )
+        {
+            WriteProperty ( "length", expectedLength );
+            WriteProperty ( "brand", brand );
+            WriteProperty ( "minor_version", minorVersion );
         }
     }
 
@@ -260,6 +273,19 @@ namespace AX
             
             _width /= 65536;
             _height /= 65536;
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "creation_time", _creationTime );
+                WriteProperty ( "modification_time", _modificationTime );
+                WriteProperty ( "duration", _duration );
+                WriteProperty ( "layer", _layer );
+                WriteProperty ( "alternate_group", _alternateGroup );
+                WriteProperty ( "volume", _volume );
+                WriteProperty ( "width", _width );
+                WriteProperty ( "height", _height );
+            }
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -290,6 +316,15 @@ namespace AX
             stream->readBig<u32> ( &_timeScale );
             ReadByVersion ( _duration );
 
+            if ( _timeScale != 0 )
+            {
+                _durationSeconds = static_cast<float>( _duration ) / static_cast<float>( _timeScale );
+            } else
+            {
+                // @todo(andrew): What to do here? Are we already in bad shape in this case?
+                _durationSeconds = static_cast<float> ( _duration );
+            }
+
             stream->readBig<u32> ( &_rate );
             stream->readBig<u16> ( &_volume );
 
@@ -301,8 +336,20 @@ namespace AX
             
             // @note(andrew): Skip predefined
             stream->seekRelative ( 6 * sizeof ( u32 ) );
-
             stream->readBig<u32> ( &_nextTrackID );
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "creation_time", _creationTime );
+                WriteProperty ( "modification_time", _modificationTime );
+                WriteProperty ( "time_scale", _timeScale );
+                WriteProperty ( "duration", _duration );
+                WriteProperty ( "duration_seconds", _durationSeconds );
+                WriteProperty ( "rate", _rate );
+                WriteProperty ( "volume", _volume );
+                WriteProperty ( "next_track_id", _nextTrackID );
+            }
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -344,12 +391,22 @@ namespace AX
                 // @todo(andrew): What to do here? Are we already in bad shape in this case?
                 _durationSeconds = static_cast<float> ( _duration );
             }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "creation_time", _creationTime );
+                WriteProperty ( "modification_time", _modificationTime );
+                WriteProperty ( "time_scale", _timeScale );
+                WriteProperty ( "duration", _duration );
+                WriteProperty ( "duration_seconds", _durationSeconds );
+            }
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
     }
 
-    void MDATAtom::Parse ( MP4&, const IStreamRef& stream, usz expectedLength )
+    void MDATAtom::Parse ( MP4& context, const IStreamRef& stream, usz expectedLength )
     {
         _offsetFromStartOfFile = stream->tell ( );
         off_t delta{ 0 };
@@ -363,6 +420,11 @@ namespace AX
                 _data.resize ( expectedLength );
                 stream->readData ( _data.data ( ), expectedLength );
             }
+        }
+
+        if ( context.Settings ( ).TracksProperties ( ) )
+        {
+            WriteProperty ( "length", expectedLength );
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -387,6 +449,12 @@ namespace AX
                 stream->readBig<u32> ( &entry );
 
                 _descriptions.push_back ( entry );
+            }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "num_descriptions", _descriptions.size ( ) );
             }
         }
 
@@ -433,6 +501,14 @@ namespace AX
                     _handlerName.append ( 1, byte );
                 }
             }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "handler", HandlerTypeToString ( _handlerType ) );
+                WriteProperty ( "subtype", HandlerSubTypeToString ( _handlerSubType ) );
+                WriteProperty ( "name", Name ( ) );
+            }
         }
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
     }
@@ -464,6 +540,12 @@ namespace AX
                     _sampleSizes[i] = sampleSize;
                 }
             }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "num_samples", _sampleSizes.size() );
+            }
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -486,6 +568,12 @@ namespace AX
                 stream->readBig<u32> ( &offset );
                 
                 _chunkOffsets[i] = offset;
+            }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "num_chunk_offsets", _chunkOffsets.size ( ) );
             }
         }
 
@@ -521,6 +609,12 @@ namespace AX
 
                 chunk.ChunkCount = 0;
                 chunk.FirstSample = firstSample;
+            }
+
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "num_chunks", _chunks.size() );
             }
         }
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -582,15 +676,15 @@ namespace AX
         }
     }
 
-    MP4Ref MP4::Create ( const fs::path& path )
+    MP4Ref MP4::Create ( const fs::path& path, const Format& format )
     {
         if ( !fs::exists ( path ) ) return nullptr;
-        return MP4::Create ( loadFile ( path ) );
+        return MP4::Create ( loadFile ( path ), format );
     }
 
-    MP4Ref MP4::Create ( const DataSourceRef& source )
+    MP4Ref MP4::Create ( const DataSourceRef& source, const Format& format )
     {
-        if ( auto mp4 = MP4Ref ( new MP4 ( source ) ) )
+        if ( auto mp4 = MP4Ref ( new MP4 ( source, format ) ) )
         {
             return mp4;
         }
@@ -598,7 +692,8 @@ namespace AX
         return nullptr;
     }
 
-    MP4::MP4 ( const DataSourceRef& source )
+    MP4::MP4 ( const DataSourceRef& source, const Format& format )
+        : _format ( format )
     {
         auto containers =
         {
@@ -710,26 +805,39 @@ namespace AX
         _factories[type] = fn;
     }
 
-    static void DumpAtom ( const Atom* atom, std::ostream& stream, int indent = 0 )
+    static void DumpAtom ( const Atom* atom, std::ostream& stream, bool verbose, int indent = 0 )
     {
-        char buffer[128] = {};
-        std::snprintf ( buffer, sizeof(buffer), "%s%s\n", AX_INDENT ( indent ), atom->ToString ( ).c_str ( ) );
-
-        stream << buffer;
+        stream << AX_INDENT ( indent ) << atom->ToString ( );
+        if ( verbose )
+        {
+            u32 ctr{ 0 };
+            auto size = atom->Properties ( ).size ( );
+            if ( size > 0 )
+            {
+                stream << " [";
+                for ( auto& [name, value] : atom->Properties ( ) )
+                {
+                    stream << name << "=" << value;
+                    if ( ctr++ < size - 1 ) stream << ", ";
+                }
+                stream << "]";
+            }
+        }
+        stream << "\n";
 
         if ( atom->IsContainer ( ) )
         {
             auto* container = static_cast<const ContainerAtom*> ( atom );
             for ( auto& child : container->GetChildren ( ) )
             {
-                DumpAtom ( child.get ( ), stream, indent + 1 );
+                DumpAtom ( child.get ( ), stream, verbose, indent + 1 );
             }
         }
     }
 
-    void MP4::Dump ( std::ostream& stream ) const
+    void MP4::Dump ( std::ostream& stream, bool verbose ) const
     {
-        DumpAtom ( this, stream );
+        DumpAtom ( this, stream, verbose );
     }
 
     void MP4::Push ( ContainerAtom * atom )
@@ -887,7 +995,7 @@ namespace AX
        
         if ( auto mdat = _mdat.lock ( ) )
         {
-            sample = Sample ( handler, mdat->DataWithOffset ( offset ), sampleSize );
+            sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>(offset) ), sampleSize );
             return true;
         }
         

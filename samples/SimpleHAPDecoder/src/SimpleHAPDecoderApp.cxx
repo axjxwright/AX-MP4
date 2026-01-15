@@ -132,14 +132,14 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
     try
     {
-        _mp4 = AX::MP4::Create ( source );
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties() );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )
             {
                 _movie = AX::Movie::Create ( _mp4 );
                 _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
-                _mp4->Dump ( std::cout );
+                _mp4->Dump ( std::cout, true );
 
                 _currentSample = 0;
                 _time = 0.0f;
@@ -307,6 +307,10 @@ static void Inspect ( AX::Atom* atom )
     ui::ScopedId id{ atom };
     if ( ui::TreeNode ( AX::AtomTypeToString ( atom->Type ( ) ).c_str ( ) ) )
     {
+        for ( auto& [name, value] : atom->Properties ( ) )
+        {
+            ui::BulletText ( "%s = %s", name.c_str ( ), value.c_str ( ) );
+        }
         if ( atom->IsContainer ( ) )
         {
             auto* container = static_cast<AX::ContainerAtom*> ( atom );
