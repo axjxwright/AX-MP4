@@ -174,7 +174,7 @@ namespace AX
         }
     }
     
-    void FTYPAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
+    void FTYPAtom::Parse ( MP4 &, const IStreamRef & stream, usz expectedLength )
     {
         std::string brand{ 4, 0 };
         stream->readFixedString ( &brand, 4 );
@@ -534,13 +534,13 @@ namespace AX
         u32 group = 0;
         while ( group < _chunks.size ( ) ) 
         {
-            u32 sample_count = _chunks[group].ChunkCount * _chunks[group].SamplesPerChunk;
-            if ( sample_count == 0 ) 
+            u32 sampleCount = _chunks[group].ChunkCount * _chunks[group].SamplesPerChunk;
+            if ( sampleCount == 0 ) 
             {
                 if ( _chunks[group].FirstSample > sample ) return false;
             } else 
             {
-                if ( _chunks[group].FirstSample + sample_count <= sample ) 
+                if ( _chunks[group].FirstSample + sampleCount <= sample ) 
                 {
                     group++;
                     continue;
@@ -670,7 +670,7 @@ namespace AX
             assert ( _stack.empty ( ) && "MP4 ContainerAtom stack underflow" );
 
             _isValid = true;
-        } catch ( const std::exception& e )
+        } catch ( const std::exception& )
         {
             _error = MP4ErrorCode::Unknown;
         }
@@ -695,7 +695,7 @@ namespace AX
             stream->readBig<u32> ( (u32*)&type );
 
             return type == AtomType::kFTYP;
-        } catch ( const std::exception& e )
+        } catch ( const std::exception& )
         {
             return false;
         }
