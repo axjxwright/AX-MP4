@@ -8,7 +8,7 @@ Check out recursively into `{your_cinder_path}/blocks/` folder. HAP and Snappy a
 
 ```
 $ cd ${your_cinder_path}/blocks && git clone --recursive https://github.com/axjxwright/AX-MP4
-$ cd AX-MP4/samples/SimpleHAPDecoderApp
+$ cd AX-MP4/samples/SimpleHAPDecoder
 $ mkdir build && cd build
 $ cmake ..\proj\cmake
 $ start SimpleHAPDecoderApp.sln
