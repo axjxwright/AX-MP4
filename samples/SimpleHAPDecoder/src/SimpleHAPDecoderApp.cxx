@@ -497,7 +497,10 @@ void SimpleHAPDecoderApp::draw ( )
 
         if ( _track )
         {
-            ui::Text ( "%s | %d x %d", _frame ? _frame->getLabel ( ).c_str ( ) : "No Sample", _track->Width ( ), _track->Height ( ) );
+            std::string handler = "No Sample";
+            if ( _frame ) handler = _frame->getLabel ( );
+            if ( _YCoCgPlane ) handler = _YCoCgPlane->getLabel ( );
+            ui::Text ( "%s | %d x %d", handler.c_str(), _track->Width ( ), _track->Height ( ) );
             ui::Text ( "%d samples parsed | %.2f/%.2f", _track->SampleCount ( ), _time, _track->DurationSeconds ( ) );
 
             if ( _playRate == 0.0f )
@@ -528,12 +531,13 @@ void SimpleHAPDecoderApp::draw ( )
             float avg = 0.0f;
             for ( auto& sample : _decodeTimeHistory )
             {
-                avg += sample;
-                samples.push_back ( sample );
+                auto ms = sample * 1000.0f;
+                avg += ms;
+                samples.push_back ( ms );
             }
 
             avg /= static_cast<float> ( _decodeTimeHistory.size ( ) );
-            ui::Text ( "Average Decode Time(s): %.4f", avg );
+            ui::Text ( "Average Decode Time: %.4fms", avg );
             ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
         }
 
