@@ -23,6 +23,10 @@ endfunction()
 if ( WIN32 )
 	set(CMAKE_CXX_STANDARD 20)
 	add_compile_options(/W4)
+
+	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+	
 endif()
 
 include("${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake")
@@ -36,7 +40,10 @@ ci_make_app(
 )
 
 if ( WIN32 )
+
 	target_compile_features( ${PROJECT_NAME} PRIVATE cxx_std_20)
+	set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	
 	if ( AX_LIVEPP_ENABLED )
 		if(EXISTS "${APP_PATH}/assets/LivePP/API/x64/LPP_API_x64_CPP.h")
 		    target_link_options(${PROJECT_NAME} PUBLIC "/FUNCTIONPADMIN")

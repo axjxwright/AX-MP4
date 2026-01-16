@@ -16,6 +16,10 @@ if( NOT TARGET AX-MP4 )
 	endif()
 
 	target_link_libraries( AX-MP4 PRIVATE cinder )
+
+	if ( WIN32 )
+		set_property(TARGET AX-MP4 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	endif ( )
 	
 endif()
 

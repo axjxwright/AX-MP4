@@ -562,13 +562,12 @@ void SimpleHAPDecoderApp::draw ( )
             gl::drawSolidRect ( bounds );
         }
 
-    } else
+    } else if ( _frame )
     {
         auto bounds = Rectf ( _frame->getBounds ( ) ).getCenteredFit ( getWindowBounds ( ), true );
         std::swap ( bounds.y1, bounds.y2 );
         gl::draw ( _frame, bounds );
     }
-    
 }
 
 void Init ( App::Settings* settings )
