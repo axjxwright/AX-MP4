@@ -7,6 +7,19 @@ option(AX_LIVEPP_ENABLED "Enable LivePP" ON)
 get_filename_component( APP_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../" ABSOLUTE )
 get_filename_component( CINDER_PATH "${APP_PATH}/../../../../" ABSOLUTE )
 
+# Newer version of cinder differ in how they call
+# target_link_libraries which causes a cmake error
+# on different version of cinder. This patches and
+# corrects it
+function(target_link_libraries target)
+    if(ARGV1 MATCHES "^(PRIVATE|PUBLIC|INTERFACE)$")
+        _target_link_libraries(${target} ${ARGN})
+    else()
+        _target_link_libraries(${target} PUBLIC ${ARGN})
+        message(AUTHOR_WARNING "target_link_libraries: missing PRIVATE, PUBLIC or INTERFACE for target ${target}. Defaulting to PUBLIC.")
+    endif()
+endfunction()
+
 if ( WIN32 )
 	set(CMAKE_CXX_STANDARD 20)
 	add_compile_options(/W4)
