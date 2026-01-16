@@ -49,5 +49,5 @@ target_include_directories(hap PUBLIC "${APP_PATH}/lib/snappy")
 add_dependencies(hap snappy)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${APP_PATH}/lib/hap/source")
-target_link_libraries(${PROJECT_NAME} hap)
-target_link_libraries(${PROJECT_NAME} snappy)
+target_link_libraries(${PROJECT_NAME} PUBLIC hap)
+target_link_libraries(${PROJECT_NAME} PUBLIC snappy)
