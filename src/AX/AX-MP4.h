@@ -413,8 +413,19 @@ namespace AX
     class FTYPAtom : public Atom
     {
     public:
+        using BrandList = std::vector<std::string>;
+
         virtual AtomType Type ( ) const override { return AtomType::kFTYP; }
-        void Parse ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) override;
+        void             Parse ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) override;
+
+        u32              MinorVersion ( ) const { return _minorVersion; }
+        std::string      Brand ( ) const { return _brand; }
+        const BrandList& CompatibleBrands ( ) const { return _compatibleBrands; }
+    
+    protected:
+        u32              _minorVersion{ 0 };
+        std::string      _brand;
+        BrandList        _compatibleBrands;
     };
 
     using TKHDAtomRef = std::shared_ptr<class TKHDAtom>;
@@ -558,6 +569,36 @@ namespace AX
         std::vector<u32>    _sampleSizes;
     };
 
+    using STTSAtomRef = std::shared_ptr<class STTSAtom>;
+    class STTSAtom : public FullAtom
+    {
+    public:
+
+        struct Entry
+        {
+            u32  SampleCount{ 0 };
+            u32  SampleDelta{ 0 };
+        };
+
+        AtomType Type  ( ) const override { return AtomType::kSTTS; }
+        void     Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
+
+        u32      GetEntryCount ( ) const { return _entryCount; }
+        bool     GetEntry      ( u32 index, Entry& entry ) const
+        {
+            if ( index > _entries.size ( ) || index == 0 )
+            {
+                return false;
+            }
+            entry = _entries[index - 1];
+            return true;
+        }
+
+    protected:
+        u32                 _entryCount{ 0 };
+        std::vector<Entry>  _entries;
+    };
+
     using HDLRAtomRef = std::shared_ptr<class HDLRAtom>;
     class HDLRAtom : public FullAtom
     {
@@ -671,6 +712,7 @@ namespace AX
         MP4                         ( const ci::DataSourceRef& source, const Format& format );
         using FactoryMap            = std::unordered_map<AtomType, AtomFactoryFn>;
         
+        bool                        Load           ( );
         bool                        StartsWithFTYP ( ) const;
 
         void                        RegisterAtomFactory ( AtomType type, AtomFactoryFn fn );
@@ -685,6 +727,7 @@ namespace AX
         MP4ErrorCode                _error{ MP4ErrorCode::Unknown };
         FactoryMap                  _factories;
         Format                      _format;
+        ci::DataSourceRef           _source;
     };
 
     class Sample

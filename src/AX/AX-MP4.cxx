@@ -30,9 +30,9 @@ namespace AX
         }
 
     protected:
-        off_t & _delta;
-        off_t _before{ 0 };
-        IStreamRef _stream;
+        off_t &     _delta;
+        off_t       _before{ 0 };
+        IStreamRef  _stream;
     };
     
     #define AX_INDENT_SIZE 2
@@ -82,10 +82,19 @@ namespace AX
 
             if ( auto atom = context.CreateAtom ( type ) )
             {
-                atom->SetInfo ( { context.StackDepth ( ), actualLength } );
-                atom->Parse ( context, stream, actualLength );
+                try
+                {
 
-                AddChild ( atom );
+                    atom->SetInfo ( { context.StackDepth ( ), actualLength } );
+                    atom->Parse ( context, stream, actualLength );
+
+                    AddChild ( atom );
+                } catch ( const std::exception& e )
+                {
+                    std::printf ( "Error parsing atom '%s': %s\n", AtomTypeToString ( type ).c_str ( ), e.what ( ) );
+                    done = true;
+                    break;
+                }
             }
 
             auto after = stream->tell ( );
@@ -182,32 +191,44 @@ namespace AX
     
     void FTYPAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
     {
-        std::string brand{ 4, 0 };
-        stream->readFixedString ( &brand, 4 );
+        usz startLength{ expectedLength };
+        
+        _brand.resize ( 4 );
+        stream->readFixedString ( &_brand, 4 );
 
-        std::string majorBrand = brand;
-        std::vector<std::string> compatibleBrands;
+        stream->readBig<u32> ( &_minorVersion );
+        _compatibleBrands.push_back ( _brand );
 
-        u32 minorVersion{ 0 };
-        stream->readBig<u32> ( &minorVersion );
-          
         if ( expectedLength > 8 )
         {
             expectedLength -= 8;
             while ( expectedLength > 0 )
             {
-                std::string compat{ 4, 0 };
-                stream->readFixedString ( &compat, 4 );
+                u32 type{};
+                stream->readBig<u32> ( &type );
                 expectedLength -= 4;
-                compatibleBrands.push_back ( compat );
+
+                _compatibleBrands.push_back ( FourCCToString ( type ) );
             }
         }
 
         if ( context.Settings ( ).TracksProperties ( ) )
         {
-            WriteProperty ( "length", expectedLength );
-            WriteProperty ( "brand", brand );
-            WriteProperty ( "minor_version", minorVersion );
+            std::stringstream ss;
+            for ( auto& b : _compatibleBrands ) ss << b << ", ";
+            auto str = ss.str ( );
+
+            // note(andrew): Remove trailing ', ';
+            if ( str.length ( ) > 2 )
+            {
+                str.pop_back ( );
+                str.pop_back ( );
+            }
+
+            WriteProperty ( "length", startLength );
+            WriteProperty ( "brand", _brand );
+            WriteProperty ( "minor_version", _minorVersion );
+            WriteProperty ( "compatible_brands", str );
         }
     }
 
@@ -414,7 +435,7 @@ namespace AX
             StreamAutoAdvancer adv{ stream, delta };
             if ( auto mem = std::dynamic_pointer_cast<IStreamMem> ( stream ) )
             {
-                _stream = IStreamMem::create ( (u8 *)mem->getData ( ) + mem->tell(), expectedLength );
+                _stream = IStreamMem::create ( (u8*)mem->getData ( ) + mem->tell ( ), expectedLength );
             } else
             {
                 _data.resize ( expectedLength );
@@ -427,7 +448,15 @@ namespace AX
             WriteProperty ( "length", expectedLength );
         }
 
-        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+        // @FIXME(andrew): This occurs when MDATs are towards the end,
+        // have only seen it when parsing M4A/AAC, not sure if correct.
+        if ( stream->tell ( ) + expectedLength > stream->size ( ) )
+        {
+            stream->seekAbsolute ( stream->size ( ) );
+        } else
+        {
+            stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+        }
     }
 
     void STSDAtom::Parse ( MP4& context, const IStreamRef& stream, usz expectedLength )
@@ -545,6 +574,32 @@ namespace AX
             {
                 WriteProperty ( "length", expectedLength );
                 WriteProperty ( "num_samples", _sampleSizes.size() );
+            }
+        }
+
+        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+    }
+
+    void STTSAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
+    {
+        off_t delta{ 0 };
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            FullAtom::Parse ( context, stream, 4 );
+
+            stream->readBig<u32> ( &_entryCount );
+            _entries.resize ( _entryCount );
+
+            for ( u32 i = 0; i < _entryCount; i++ )
+            {
+                stream->readBig<u32> ( &_entries[i].SampleCount );
+                stream->readBig<u32> ( &_entries[i].SampleDelta );
+            }
+            
+            if ( context.Settings ( ).TracksProperties ( ) )
+            {
+                WriteProperty ( "length", expectedLength );
+                WriteProperty ( "num_entries", _entries.size ( ) );
             }
         }
 
@@ -701,6 +756,7 @@ namespace AX
     {
         if ( auto mp4 = MP4Ref ( new MP4 ( source, format ) ) )
         {
+            mp4->Load ( );
             return mp4;
         }
 
@@ -709,6 +765,7 @@ namespace AX
 
     MP4::MP4 ( const DataSourceRef& source, const Format& format )
         : _format ( format )
+        , _source ( source )
     {
         auto containers =
         {
@@ -757,22 +814,26 @@ namespace AX
         RegisterAtomFactory ( AtomType::kSTCO, [=] { return std::make_shared<STCOAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kSTSC, [=] { return std::make_shared<STSCAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kSTSS, [=] { return std::make_shared<FullAtom> ( AtomType::kSTSS ); } );
-        RegisterAtomFactory ( AtomType::kSTTS, [=] { return std::make_shared<FullAtom> ( AtomType::kSTTS ); } );
+        RegisterAtomFactory ( AtomType::kSTTS, [=] { return std::make_shared<STTSAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kFRMA, [=] { return std::make_shared<UnknownAtom> ( AtomType::kFRMA ); } );
         RegisterAtomFactory ( AtomType::kSCHM, [=] { return std::make_shared<FullAtom> ( AtomType::kSCHM ); } );
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
         RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kAVC1 ); } );
+        
+    }
 
+    bool MP4::Load ( )
+    {
         try
         {
-            _buffer = source->getBuffer ( );
+            _buffer = _source->getBuffer ( );
             u64 streamSize = _buffer->getSize ( );
             auto stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
 
             if ( !StartsWithFTYP ( ) )
             {
                 _error = MP4ErrorCode::InvalidHeader;
-                return;
+                return _isValid;
             }
 
             Parse ( *this, stream, streamSize );
@@ -783,6 +844,8 @@ namespace AX
         {
             _error = MP4ErrorCode::Unknown;
         }
+
+        return _isValid;
     }
 
     bool MP4::StartsWithFTYP ( ) const

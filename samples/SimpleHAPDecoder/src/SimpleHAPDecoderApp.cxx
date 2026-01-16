@@ -84,6 +84,111 @@ namespace AX
 namespace AX { static void InitLivePP ( ) {} };
 #endif
 
+static const char* kGenericVS = CI_GLSL ( 150,
+                                            uniform mat4 ciModelViewProjection;
+                                            in vec4 ciPosition;
+                                            in vec2 ciTexCoord0;
+
+                                            out vec2 UV;
+
+                                            void main ( )
+                                            {
+                                                gl_Position = ciModelViewProjection * ciPosition;
+                                                UV = ciTexCoord0;
+                                            }
+                                         );
+
+static const char* kYCoCgFS = CI_GLSL ( 150,
+                                                uniform sampler2D uTex0;
+                                                
+                                                in vec2 UV;
+                                                out vec4 FinalColor;
+
+                                                const vec4 kOffsets = vec4 ( -0.50196078431373, -0.50196078431373, 0.0, 0.0 );
+
+                                                void main ( )
+                                                {
+                                                    vec4 CoCgSY = texture ( uTex0, UV );
+
+                                                    CoCgSY += kOffsets;
+
+                                                    float scale = ( CoCgSY.z * ( 255.0 / 8.0 ) ) + 1.0;
+
+                                                    float Co = CoCgSY.x / scale;
+                                                    float Cg = CoCgSY.y / scale;
+                                                    float Y = CoCgSY.w;
+
+                                                    vec4 rgba = vec4 ( Y + Co - Cg, Y + Cg, Y - Co - Cg, 1.0 );
+
+                                                    FinalColor = rgba;
+                                                }
+                                             );
+
+static const char* kYCoCgAlphaFS = CI_GLSL ( 150,
+                                                uniform sampler2D uTex0;
+                                                uniform sampler2D uTex1;
+
+                                                in vec2 UV;
+                                                out vec4 FinalColor;
+
+                                                const vec4 kOffsets = vec4 ( -0.50196078431373, -0.50196078431373, 0.0, 0.0 );
+
+                                                void main ( )
+                                                {
+                                                    vec4 CoCgSY = texture ( uTex0, UV );
+                                                    vec4 theAlpha = texture ( uTex1, UV );
+
+                                                    CoCgSY += kOffsets;
+
+                                                    float scale = ( CoCgSY.z * ( 255.0 / 8.0 ) ) + 1.0;
+
+                                                    float Co = CoCgSY.x / scale;
+                                                    float Cg = CoCgSY.y / scale;
+                                                    float Y = CoCgSY.w;
+
+                                                    vec4 rgba = vec4 ( Y + Co - Cg, Y + Cg, Y - Co - Cg, theAlpha.r );
+
+                                                    FinalColor = rgba;
+                                                }
+                                             );
+
+static gl::GlslProgRef kYCoCgAlphaShader ( )
+{
+    static gl::GlslProgRef kShader;
+    if ( !kShader )
+    {
+        try
+        {
+            kShader = gl::GlslProg::create ( gl::GlslProg::Format ( ).vertex ( kGenericVS ).fragment ( kYCoCgAlphaFS ) );
+            kShader->uniform ( "uTex0", 0 );
+            kShader->uniform ( "uTex1", 1 );
+        } catch ( const std::exception& e )
+        {
+            std::printf ( "Shader: %s\n", e.what ( ) );
+        }
+    }
+
+    return kShader;
+}
+
+static gl::GlslProgRef kYCoCgShader ( )
+{
+    static gl::GlslProgRef kShader;
+    if ( !kShader )
+    {
+        try
+        {
+            kShader = gl::GlslProg::create ( gl::GlslProg::Format ( ).vertex ( kGenericVS ).fragment ( kYCoCgFS ) );
+            kShader->uniform ( "uTex0", 0 );
+        } catch ( const std::exception& e )
+        {
+            std::printf ( "Shader: %s\n", e.what ( ) );
+        }
+    }
+
+    return kShader;
+}
+
 class SimpleHAPDecoderApp : public App
 {
 public:
@@ -95,10 +200,14 @@ public:
 protected:
 
     bool            LoadMP4       ( const DataSourceRef& source );
-    gl::TextureRef  DecodeFrameAt ( int index );
+    bool            DecodeFrameAt ( int index );
 
     int             _currentSample{ 0 };
     gl::TextureRef  _frame;
+    
+    gl::TextureRef  _YCoCgPlane;
+    gl::TextureRef  _alphaPlane;
+    
     AX::MP4Ref      _mp4;
     AX::MovieRef    _movie;
     AX::TrackRef    _track{ nullptr };
@@ -144,7 +253,7 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
                 _currentSample = 0;
                 _time = 0.0f;
 
-                _frame = DecodeFrameAt ( 0 );
+                DecodeFrameAt ( 0 );
                 return true;
             } else
             {
@@ -172,7 +281,7 @@ void SimpleHAPDecoderApp::update ( )
         int sample = (int)lmap ( _time, 0.0f, _track->DurationSeconds ( ), 0.0f, static_cast<float> ( _track->SampleCount ( ) - 1 ) );
         if ( sample != _currentSample )
         {
-            _frame = DecodeFrameAt ( sample );
+            DecodeFrameAt ( sample );
             _currentSample = sample;
         }
     }
@@ -183,11 +292,117 @@ void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
     LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
 }
 
-static uint32_t kHAP1 = 'Hap1'; // AX_FOURCC ( 'H', 'a', 'p', '1' );
-static uint32_t kHAP5 = AX_FOURCC ( 'H', 'a', 'p', '5' );
-static uint32_t kJPEG = AX_FOURCC ( 'j', 'p', 'e', 'g' );
+const uint32_t kHAP1 = 'Hap1';
+const uint32_t kHAP5 = 'Hap5';
+const uint32_t kHAPY = 'HapY';
+const uint32_t kHAPM = 'HapM';
+const uint32_t kJPEG = 'jpeg';
 
-gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
+inline bool IsHapHandler ( uint32_t type )
+{
+    switch ( type )
+    {
+        case kHAP1:
+        case kHAP5:
+        case kHAPY:
+        case kHAPM:
+        {
+            return true;
+        }    
+    }
+
+    return false;
+}
+
+gl::Texture2dRef HapDecodeFrameAt ( uint32_t index, uint32_t handler, uint32_t width, uint32_t height, const uint8_t* sampleData, unsigned long sampleDataLength )
+{
+    unsigned long uncompressedLen = ( ( width + 3 ) / 4 ) * ( ( height + 3 ) / 4 ) * 8;
+    
+    uint32_t format{ 0 };
+    uint32_t status = HapGetFrameTextureFormat ( sampleData, sampleDataLength, 0, &format );
+
+    unsigned long actualSize{ 0 };
+    static std::vector<uint8_t> decompressed;
+
+    auto DecodeCallback = []( HapDecodeWorkFunction function, void* p, uint32_t count, void* )
+    {
+        std::printf ( "DecodeCallback: %d\n", count );
+        for ( uint32_t i = 0; i < count; i++ )
+        {
+            function ( p, i );
+        }
+    };
+
+    uint32_t chunks{ 0 };
+    status = HapMaxEncodedLength ( 1, &uncompressedLen, &format, &chunks );
+    std::printf ( "HapMaxEncodedLength(%d) = %lu\n", status, uncompressedLen );
+    uncompressedLen *= 2;
+
+    if ( decompressed.size ( ) < uncompressedLen )
+    {
+        std::printf ( "Resizing decompress buffer: %d\n", uncompressedLen );
+        decompressed.resize ( uncompressedLen );
+    }
+
+    status = HapDecode ( sampleData, sampleDataLength, index, DecodeCallback, nullptr, decompressed.data ( ), uncompressedLen, &actualSize, &format );
+    std::printf ( "DecodeStatus: %d\n", status );
+    if ( status == HapResult_No_Error )
+    {
+        std::printf ( "HapFormat: %x\n", format );
+        GLenum glFormat = 0;
+
+        switch ( format )
+        {
+            case HapTextureFormat_RGB_DXT1:
+            {
+                glFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+                break;
+            }
+
+            case HapTextureFormat_RGBA_DXT5:
+            {
+                glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+                break;
+            }
+
+            case HapTextureFormat_A_RGTC1:
+            {
+                glFormat = GL_COMPRESSED_RED_RGTC1_EXT;
+                break;
+            }
+
+            case HapTextureFormat_YCoCg_DXT5:
+            {
+                glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+                break;
+            }
+        }
+
+        if ( glFormat != 0 )
+        {
+            GLuint texId{ 0 };
+            GLenum target = GL_TEXTURE_2D;
+
+            glGenTextures ( 1, &texId );
+            glHint ( GL_TEXTURE_COMPRESSION_HINT, GL_NICEST );
+
+            gl::ScopedTextureBind tex0{ target, texId };
+            glCompressedTexImage2D ( target, 0, glFormat, width, height, 0, actualSize, decompressed.data ( ) );
+
+            auto tex = gl::Texture::create ( target, texId, width, height, false );
+            tex->setMinFilter ( GL_LINEAR );
+            tex->setMagFilter ( GL_LINEAR );
+            tex->setLabel ( AX::FourCCToString ( handler ) );
+            CI_CHECK_GL ( );
+            std::printf ( "ok!\n" );
+            return tex;
+        }
+    }
+
+    return nullptr;
+}
+
+bool SimpleHAPDecoderApp::DecodeFrameAt ( int index )
 {
     AX::Sample sample{};
     if ( _track && _track->ReadSample ( index, sample ) )
@@ -203,109 +418,57 @@ gl::TextureRef SimpleHAPDecoderApp::DecodeFrameAt ( int index )
                 auto stream = IStreamMem::create ( sample.Data ( ), sample.Length ( ) );
                 auto image = loadImage ( DataSourceBuffer::create ( loadStreamBuffer ( stream ) ), ImageSource::Options ( ), "jpg" );
                 _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
-                return gl::Texture::create ( image, gl::Texture::Format ( ).label ( AX::FourCCToString ( sample.Handler ( ) ) ) );
+
+                _YCoCgPlane = nullptr;
+                _alphaPlane = nullptr;
+                _frame = gl::Texture::create ( image, gl::Texture::Format ( ).label ( AX::FourCCToString ( sample.Handler ( ) ) ) );
+                return true;
             } catch ( const std::exception& e )
             {
                 std::printf ( "err %s\n", e.what ( ) );
-                return nullptr;
+                return false;
             }
-        } else if ( sample.Handler ( ) == kHAP1 || sample.Handler ( ) == kHAP5 )
+        } else if ( IsHapHandler ( sample.Handler ( ) ) )
         {
-            unsigned long uncompressedLen = ( ( _track->Width ( ) + 3 ) / 4 ) * ( ( _track->Height ( ) + 3 ) / 4 ) * 8;
-            auto* sampleData = sample.Data ( );
-
             uint32_t textureCount{ 0 };
-            if ( HapGetFrameTextureCount ( sampleData, sample.Length ( ), &textureCount ) == HapResult_No_Error && textureCount > 0 )
+            if ( HapGetFrameTextureCount ( sample.Data ( ), sample.Length ( ), &textureCount ) == HapResult_No_Error && textureCount > 0 )
             {
-                uint32_t format{ 0 };
-                uint32_t status = HapGetFrameTextureFormat ( sampleData, sample.Length ( ), 0, &format );
-                
-                unsigned long actualSize{ 0 };
-                static std::vector<uint8_t> decompressed;
-
-                auto DecodeCallback = []( HapDecodeWorkFunction function, void* p, uint32_t count, void* )
+                if ( textureCount == 2 )
                 {
-                    std::printf ( "DecodeCallback: %d\n", count );
-                    for ( uint32_t i = 0; i < count; i++ )
-                    {
-                        function ( p, i );
-                    }
-                };
+                    _frame = nullptr;
+                    _YCoCgPlane = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
+                    _alphaPlane = HapDecodeFrameAt ( 1, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
+                    _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
 
-                uint32_t chunks{ 0 };
-                status = HapMaxEncodedLength ( 1, &uncompressedLen, &format, &chunks );
-                std::printf ( "HapMaxEncodedLength(%d) = %lu\n", status, uncompressedLen );
-                uncompressedLen *= 2;
-
-                if ( decompressed.size ( ) < uncompressedLen )
+                    if ( _YCoCgPlane && _alphaPlane ) return true;
+                    return false;
+                } else
                 {
-                    std::printf ( "Resizing decompress buffer: %d\n", uncompressedLen );
-                    decompressed.resize ( uncompressedLen );
-                }
+                    _YCoCgPlane = nullptr;
+                    _alphaPlane = nullptr;
+                    _frame = nullptr;
 
-                status = HapDecode ( sampleData, sample.Length ( ), 0, DecodeCallback, nullptr, decompressed.data ( ), uncompressedLen, &actualSize, &format );
-                std::printf ( "DecodeStatus: %d\n", status );
-                if ( status == HapResult_No_Error )
-                {
-                    std::printf ( "HapFormat: %x\n", format );
-                    GLenum glFormat = 0;
-
-                    switch ( format )
+                    if ( sample.Handler ( ) == kHAPY )
                     {
-                        case HapTextureFormat_RGB_DXT1:
-                        {
-                            glFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
-                            break;
-                        }
-
-                        case HapTextureFormat_RGBA_DXT5:
-                        {
-                            glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-                            break;
-                        }
-
-                        case HapTextureFormat_A_RGTC1:
-                        {
-                            glFormat = GL_COMPRESSED_RED_RGTC1_EXT;
-                            break;
-
-                        }
-                    }
-
-                    if ( glFormat != 0 )
+                        _YCoCgPlane = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
+                    } else
                     {
-                        // Don't include GL time in measurement;
-                        _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
-
-                        GLuint texId{ 0 };
-                        GLenum target = GL_TEXTURE_2D;
-
-                        glGenTextures ( 1, &texId );
-                        glHint ( GL_TEXTURE_COMPRESSION_HINT, GL_NICEST );
-
-                        gl::ScopedTextureBind tex0{ target, texId };
-                        glCompressedTexImage2D ( target, 0, glFormat, _track->Width ( ), _track->Height ( ), 0, actualSize, decompressed.data ( ) );
-
-                        auto tex = gl::Texture::create ( target, texId, _track->Width ( ), _track->Height ( ), false );
-                        tex->setMinFilter ( GL_LINEAR );
-                        tex->setMagFilter ( GL_LINEAR );
-                        tex->setLabel ( AX::FourCCToString ( sample.Handler ( ) ) );
-                        CI_CHECK_GL ( );
-                        std::printf ( "ok!\n" );
-                        return tex;
+                        _frame = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
                     }
+                    _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
+                    if ( _frame ) return true;
                 }
             }
         }
     }
-
-    return nullptr;
+    return false;
 }
 
 static void Inspect ( AX::Atom* atom )
 {
     ui::ScopedId id{ atom };
-    if ( ui::TreeNode ( AX::AtomTypeToString ( atom->Type ( ) ).c_str ( ) ) )
+    
+    if ( ui::TreeNodeEx ( AX::AtomTypeToString ( atom->Type ( ) ).c_str ( ), ImGuiTreeNodeFlags_SpanFullWidth ) )
     {
         for ( auto& [name, value] : atom->Properties ( ) )
         {
@@ -325,7 +488,7 @@ static void Inspect ( AX::Atom* atom )
 
 void SimpleHAPDecoderApp::draw ( )
 {
-    gl::clear ( Colorf ( 1.0f, 0.0f, 0.0f ) );
+    gl::clear ( Colorf::gray ( 0.1f ) );
     {
         static auto kRenderer = gl::getString ( GL_RENDERER );
 
@@ -371,16 +534,37 @@ void SimpleHAPDecoderApp::draw ( )
 
             avg /= static_cast<float> ( _decodeTimeHistory.size ( ) );
             ui::Text ( "Average Decode Time(s): %.4f", avg );
-            ui::PlotLines ( "##", samples.data ( ), samples.size ( ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
+            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
         }
 
         if ( _mp4 ) Inspect ( _mp4.get ( ) );
     }
 
-    if ( _frame )
+    if ( _YCoCgPlane )
     {
-        gl::draw ( _frame, getWindowBounds ( ) );
+        auto bounds = Rectf ( _YCoCgPlane->getBounds ( ) ).getCenteredFit ( getWindowBounds ( ), true );
+        std::swap ( bounds.y1, bounds.y2 );
+
+        if ( _alphaPlane )
+        {
+            gl::ScopedTextureBind tex0{ _YCoCgPlane, 0 };
+            gl::ScopedTextureBind tex1{ _alphaPlane, 1 };
+            gl::ScopedGlslProg shader{ kYCoCgAlphaShader()};
+            gl::drawSolidRect ( bounds );
+        } else
+        {
+            gl::ScopedTextureBind tex0{ _YCoCgPlane, 0 };
+            gl::ScopedGlslProg shader{ kYCoCgShader()};
+            gl::drawSolidRect ( bounds );
+        }
+
+    } else
+    {
+        auto bounds = Rectf ( _frame->getBounds ( ) ).getCenteredFit ( getWindowBounds ( ), true );
+        std::swap ( bounds.y1, bounds.y2 );
+        gl::draw ( _frame, bounds );
     }
+    
 }
 
 void Init ( App::Settings* settings )
