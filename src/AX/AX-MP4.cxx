@@ -193,8 +193,10 @@ namespace AX
     {
         usz startLength{ expectedLength };
         
-        _brand.resize ( 4 );
-        stream->readFixedString ( &_brand, 4 );
+        u32 brand{ 0 };
+        stream->readBig<u32> ( &brand );
+        
+        _brand = AX::FourCCToString ( brand );
 
         stream->readBig<u32> ( &_minorVersion );
         _compatibleBrands.push_back ( _brand );
@@ -208,13 +210,17 @@ namespace AX
                 stream->readBig<u32> ( &type );
                 expectedLength -= 4;
 
-                _compatibleBrands.push_back ( FourCCToString ( type ) );
+                if ( type != 0 )
+                {
+                    _compatibleBrands.push_back ( FourCCToString ( type ) );
+                }
             }
         }
 
         if ( context.Settings ( ).TracksProperties ( ) )
         {
             std::stringstream ss;
+            ss << "[";
             for ( auto& b : _compatibleBrands ) ss << b << ", ";
             auto str = ss.str ( );
 
@@ -224,6 +230,7 @@ namespace AX
                 str.pop_back ( );
                 str.pop_back ( );
             }
+            str += "]";
 
             WriteProperty ( "length", startLength );
             WriteProperty ( "brand", _brand );

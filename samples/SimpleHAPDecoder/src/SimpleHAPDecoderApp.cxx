@@ -294,6 +294,7 @@ void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
 
 const uint32_t kHAP1 = 'Hap1';
 const uint32_t kHAP5 = 'Hap5';
+const uint32_t kHAP7 = 'Hap7';
 const uint32_t kHAPY = 'HapY';
 const uint32_t kHAPM = 'HapM';
 const uint32_t kJPEG = 'jpeg';
@@ -304,6 +305,7 @@ inline bool IsHapHandler ( uint32_t type )
     {
         case kHAP1:
         case kHAP5:
+        case kHAP7:
         case kHAPY:
         case kHAPM:
         {
@@ -374,6 +376,12 @@ gl::Texture2dRef HapDecodeFrameAt ( uint32_t index, uint32_t handler, uint32_t w
             case HapTextureFormat_YCoCg_DXT5:
             {
                 glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+                break;
+            }
+
+            case HapTextureFormat_RGBA_BPTC_UNORM:
+            {
+                glFormat = GL_COMPRESSED_RGBA_BPTC_UNORM;
                 break;
             }
         }

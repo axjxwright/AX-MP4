@@ -229,7 +229,7 @@ namespace AX
         kSBTL = AX_FOURCC ( 's', 'b', 't', 'l' ),
     };
 
-    inline std::string FourCCToString ( u32 fcc )
+    inline std::string FourCCToString ( u32 fcc, bool trim = true )
     {
         char chars[4] =
         {
@@ -238,7 +238,10 @@ namespace AX
             static_cast<char>( ( fcc >> 8 ) & 0xFF ),
             static_cast<char>( ( fcc >> 0 ) & 0xFF )
         };
-        return std::string ( chars, 4 );
+
+        auto result = std::string ( chars, 4 );
+        if ( trim ) while ( result.back ( ) == ' ' ) result.pop_back ( );
+        return result;
     }
 
     inline std::string AtomTypeToString ( AtomType type )

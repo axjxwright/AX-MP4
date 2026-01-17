@@ -16,7 +16,7 @@ function(target_link_libraries target)
         _target_link_libraries(${target} ${ARGN})
     else()
         _target_link_libraries(${target} PUBLIC ${ARGN})
-        message(AUTHOR_WARNING "target_link_libraries: missing PRIVATE, PUBLIC or INTERFACE for target ${target}. Defaulting to PUBLIC.")
+        # message(AUTHOR_WARNING "target_link_libraries: missing PRIVATE, PUBLIC or INTERFACE for target ${target}. Defaulting to PUBLIC.")
     endif()
 endfunction()
 
