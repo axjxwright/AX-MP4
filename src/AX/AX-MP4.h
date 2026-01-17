@@ -15,6 +15,7 @@
 #include <functional>
 #include <unordered_map>
 #include <stack>
+#include <variant>
 
 namespace AX
 {
@@ -520,16 +521,22 @@ namespace AX
         AtomType            Type ( ) const override { return AtomType::kMDAT; }
         void                Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
 
-        const u8 *          DataWithOffset ( off_t offset ) { return Data ( ) + offset - _offsetFromStartOfFile; }
-        usz                 DataSize ( ) const { return _stream ? _stream->size ( ) : _data.size ( ); }
-        bool                OwnsMemory ( ) const { return _stream != nullptr; }
+        std::vector<u8>     DataWithOffset ( off_t offset, size_t size ) const;
+        const u8*           ZeroCopyDataWithOffset ( off_t offset ) const;
+        usz                 DataSize ( ) const { return _length; }
+        bool                OwnsMemory ( ) const { return _ownsMemory; }
+        bool                IsZeroCopy ( ) const { return _isZeroCopy; }
 
     protected:
-        const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>(_stream->getData()) : _data.data(); }
+        //const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>(_stream->getData()) : _data.data(); }
+        
         
         std::vector<u8>     _data;
-        ci::IStreamMemRef   _stream;
+        ci::IStreamRef      _stream;
+        bool                _ownsMemory{ false };
+        bool                _isZeroCopy{ false };
         u32                 _offsetFromStartOfFile{ 0 };
+        usz                 _length{ 0 };
     };
 
     using STSDAtomRef = std::shared_ptr<class STSDAtom>;
@@ -691,10 +698,15 @@ namespace AX
     public:
         struct Format
         {
-            Format& TrackProperties  ( bool track = true ) { _trackProperties = track; return *this; }
+            Format& TrackProperties  ( bool track ) { _trackProperties = track; return *this; }
             bool    TracksProperties ( ) const { return _trackProperties; };
+
+            Format& PreloadIntoMemory ( bool preload ) { _preloadIntoMemory = preload; return *this; }
+            bool    PreloadsIntoMemory ( ) const { return _preloadIntoMemory; };
+
         protected:
             bool    _trackProperties{ false };
+            bool    _preloadIntoMemory{ false };
         };
 
         friend class ContainerAtom;
@@ -737,19 +749,30 @@ namespace AX
     public:
         Sample ( ) {};
         Sample ( u32 handler, const u8* data, u32 length )
-        : _handler ( handler )
-        , _data ( data )
-        , _length ( length )
-        { }
+            : _handler ( handler )
+            , _data ( data )
+            , _length ( length )
+            , _ownsData ( false )
+        {}
+        Sample ( u32 handler, const std::vector<u8>& data )
+            : _handler ( handler )
+            , _data ( data )
+            , _length ( static_cast<u32>(data.size ( )) )
+            , _ownsData ( true )
+        {}
 
-        u32       Handler   ( ) const { return _handler; }
-        const u8* Data      ( ) const { return _data; }
-        u32       Length    ( ) const { return _length; }
+        u32       Handler ( ) const { return _handler; }
+        const u8* Data ( ) const { return _ownsData ? std::get<std::vector<u8>> ( _data ).data ( ) : std::get<const u8 *> ( _data ); }
+        u32       Length ( ) const { return _length; }
 
     protected:
-        int       _handler{ 0 };
-        const u8* _data{ nullptr };
-        u32       _length{ 0 };
+
+        using DataUnion = std::variant<std::vector<u8>, const u8*>;
+
+        int             _handler{ 0 };
+        u32             _length{ 0 };
+        bool            _ownsData{ false };
+        DataUnion       _data;
     };
 
     enum class TrackType

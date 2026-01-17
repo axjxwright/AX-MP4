@@ -436,19 +436,34 @@ namespace AX
 
     void MDATAtom::Parse ( MP4& context, const IStreamRef& stream, usz expectedLength )
     {
-        _offsetFromStartOfFile = stream->tell ( );
+        _length = expectedLength;
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
+            
             if ( auto mem = std::dynamic_pointer_cast<IStreamMem> ( stream ) )
             {
                 _stream = IStreamMem::create ( (u8*)mem->getData ( ) + mem->tell ( ), expectedLength );
+                _offsetFromStartOfFile = stream->tell ( );
+                _isZeroCopy = true;
             } else
             {
-                auto cursor = stream->tell ( );
-                _data.resize ( expectedLength );
-                stream->readData ( _data.data ( ), expectedLength );
-                stream->seekAbsolute ( cursor );
+                if ( context.Settings ( ).PreloadsIntoMemory ( ) )
+                {
+                    auto cursor = stream->tell ( );
+                    _data.resize ( expectedLength );
+                    stream->readData ( _data.data ( ), expectedLength );
+                    stream->seekAbsolute ( cursor );
+                    
+                    _offsetFromStartOfFile = stream->tell ( );
+                    _stream = IStreamMem::create ( _data.data ( ), expectedLength );
+                    _ownsMemory = true;
+                    _isZeroCopy = true;
+                } else
+                {
+                    _offsetFromStartOfFile = 0;
+                    _stream = stream;
+                }
             }
         }
 
@@ -466,6 +481,29 @@ namespace AX
         {
             stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
         }
+    }
+
+    std::vector<u8> MDATAtom::DataWithOffset ( off_t offset, size_t size ) const
+    {
+        if ( _isZeroCopy ) std::printf ( "MDAT is zero copy, use MDATAtom::ZeroCopyDataWithOffset instead\n" );
+
+        std::vector<u8> data; 
+        data.resize ( size );
+        
+        _stream->seekAbsolute ( offset - _offsetFromStartOfFile );
+        _stream->readData ( data.data ( ), size );
+        
+        return data;
+    }
+
+    const u8* MDATAtom::ZeroCopyDataWithOffset ( off_t offset ) const
+    {
+        assert ( _isZeroCopy );
+        if ( auto mem = std::dynamic_pointer_cast<IStreamMem> ( _stream ) )
+        {
+            return (const u8*)mem->getData ( ) + offset - _offsetFromStartOfFile;
+        }
+        return nullptr;
     }
 
     void STSDAtom::Parse ( MP4& context, const IStreamRef& stream, usz expectedLength )
@@ -1084,7 +1122,13 @@ namespace AX
        
         if ( auto mdat = _mdat.lock ( ) )
         {
-            sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>(offset) ), sampleSize );
+            if ( mdat->IsZeroCopy ( ) )
+            {
+                sample = Sample ( handler, mdat->ZeroCopyDataWithOffset ( static_cast<off_t>( offset ) ), sampleSize );
+            } else
+            {
+                sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>( offset ), sampleSize ) );
+            }
             return true;
         }
         

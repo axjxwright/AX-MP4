@@ -241,7 +241,7 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
     try
     {
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties() );
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties(true).PreloadIntoMemory(true) );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )
