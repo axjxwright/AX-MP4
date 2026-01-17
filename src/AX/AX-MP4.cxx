@@ -445,8 +445,10 @@ namespace AX
                 _stream = IStreamMem::create ( (u8*)mem->getData ( ) + mem->tell ( ), expectedLength );
             } else
             {
+                auto cursor = stream->tell ( );
                 _data.resize ( expectedLength );
                 stream->readData ( _data.data ( ), expectedLength );
+                stream->seekAbsolute ( cursor );
             }
         }
 
@@ -833,11 +835,10 @@ namespace AX
     {
         try
         {
-            _buffer = _source->getBuffer ( );
-            u64 streamSize = _buffer->getSize ( );
-            auto stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
+            IStreamRef stream = _source->createStream ( );
+            u64 streamSize = stream->size ( );
 
-            if ( !StartsWithFTYP ( ) )
+            if ( !StartsWithFTYP ( stream ) )
             {
                 _error = MP4ErrorCode::InvalidHeader;
                 return _isValid;
@@ -855,27 +856,29 @@ namespace AX
         return _isValid;
     }
 
-    bool MP4::StartsWithFTYP ( ) const
+    bool MP4::StartsWithFTYP ( const IStreamRef& stream ) const
     {
         const u32 kHeaderSize = 2 * sizeof ( u32 );
      
-        if ( !_buffer ) return false;
-        if ( _buffer->getSize ( ) < kHeaderSize ) return false;
+        if ( !stream ) return false;
+        if ( stream->size() < kHeaderSize ) return false;
 
+        auto cursor = stream->tell ( );
+        
         try
         {
-            auto stream = IStreamMem::create ( _buffer->getData ( ), kHeaderSize );
-
             u32 length{};
             stream->readBig<u32> ( &length );
             if ( length < 4 * sizeof ( u32 ) ) return false;
 
             AtomType type{ AtomType::kUNKN };
             stream->readBig<u32> ( (u32*)&type );
+            stream->seekRelative ( cursor - stream->tell() );
 
             return type == AtomType::kFTYP;
         } catch ( const std::exception& )
         {
+            stream->seekRelative ( cursor - stream->tell ( ) );
             return false;
         }
     }

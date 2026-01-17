@@ -520,12 +520,13 @@ namespace AX
         AtomType            Type ( ) const override { return AtomType::kMDAT; }
         void                Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
 
-        const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>( _stream->getData()) : _data.data(); }
-        const u8 *          DataWithOffset ( off_t offset ) { return Data ( ) + offset - ( _stream ? _offsetFromStartOfFile : 0 ); }
+        const u8 *          DataWithOffset ( off_t offset ) { return Data ( ) + offset - _offsetFromStartOfFile; }
         usz                 DataSize ( ) const { return _stream ? _stream->size ( ) : _data.size ( ); }
         bool                OwnsMemory ( ) const { return _stream != nullptr; }
 
     protected:
+        const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>(_stream->getData()) : _data.data(); }
+        
         std::vector<u8>     _data;
         ci::IStreamMemRef   _stream;
         u32                 _offsetFromStartOfFile{ 0 };
@@ -706,7 +707,6 @@ namespace AX
         
         // @note(andrew): -1 to Ignore self
         u32                         StackDepth  ( ) const { return static_cast<u32>(_stack.size ( )) - 1; } 
-        const ci::BufferRef&        Buffer      ( ) const { return _buffer; }
         bool                        IsValid     ( ) const { return _isValid; }
         MP4ErrorCode                Error       ( ) const { return _error; }
         const Format&               Settings    ( ) const { return _format; }
@@ -716,7 +716,7 @@ namespace AX
         using FactoryMap            = std::unordered_map<AtomType, AtomFactoryFn>;
         
         bool                        Load           ( );
-        bool                        StartsWithFTYP ( ) const;
+        bool                        StartsWithFTYP ( const ci::IStreamRef& stream ) const;
 
         void                        RegisterAtomFactory ( AtomType type, AtomFactoryFn fn );
         void                        Push ( ContainerAtom* atom );
@@ -725,7 +725,6 @@ namespace AX
         ContainerAtom*              Top ( ) const;
         
         bool                        _isValid{ false };
-        ci::BufferRef               _buffer;
         std::stack<ContainerAtom *> _stack;
         MP4ErrorCode                _error{ MP4ErrorCode::Unknown };
         FactoryMap                  _factories;
