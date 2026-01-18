@@ -254,7 +254,7 @@ const uint32_t kJPEG = 'jpeg';
 
 bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
-    //try
+    try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
         _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
@@ -270,7 +270,7 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
                 _track->RegisterDecoder<HAPDecoder> ( kHAPY );
                 _track->RegisterDecoder<HAPDecoder> ( kHAPM );
                 _track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
-                
+
                 _mp4->Dump ( std::cout, true );
 
                 _currentSample = 0;
@@ -283,10 +283,10 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
                 std::printf ( "Error loading MP4: %s\n", AX::MP4ErrorCodeToString ( _mp4->Error ( ) ) );
             }
         }
-    }/* catch ( const std::exception& e )
+    } catch ( const std::exception& e )
     {
         std::printf ( "Error loading MP4: %s\n", e.what ( ) );
-    }*/
+    }
 
     return false;
 }
