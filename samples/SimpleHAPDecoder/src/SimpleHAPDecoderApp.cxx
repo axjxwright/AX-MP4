@@ -7,6 +7,7 @@
 //
 
 #include <AX/AX-MP4.h>
+#include "Decoders.h"
 
 #include "cinder/app/App.h"
 #include "cinder/app/RendererGl.h"
@@ -15,9 +16,9 @@
 #include "cinder/CinderImGui.h"
 #include "cinder/Breakpoint.h"
 
-#include "hap.h"
 #include <iostream>
 #include "circular/circular.h"
+#include "cinder/ConcurrentCircularBuffer.h"
 
 namespace ui = ImGui;
 
@@ -199,10 +200,13 @@ public:
 
 protected:
 
-    bool            LoadMP4       ( const DataSourceRef& source );
-    bool            DecodeFrameAt ( int index );
+    bool            LoadMP4             ( const DataSourceRef& source );
+    void            DecodeFrameAt       ( int index );
+    void            DecodeFrameAtAsync  ( int index );
+    void            OnSampleDecoded     ( const AX::ITrackDecoderRef& decoded );
 
-    int             _currentSample{ 0 };
+    int                     _currentSample{ 0 };
+    AX::ITrackDecoderRef    _decoded;
     gl::TextureRef  _frame;
     
     gl::TextureRef  _YCoCgPlane;
@@ -214,13 +218,16 @@ protected:
     float           _playRate{ 0.0f };
     float           _time{ 0 };
     
+    bool                    _async{ false };
     circular_buffer<float>  _decodeTimeHistory{ 64 };
+    circular_buffer<float>  _fpsHistory{ 128 };
 };
 
 void SimpleHAPDecoderApp::setup ( )
 {
     gl::enableVerticalSync ( false );
-    setFrameRate ( 100000 );
+    setFrameRate ( 3000 );
+    setFpsSampleInterval ( 1.0f / 60.0f );
 
     ui::Initialize ( );
     AX::InitLivePP ( );
@@ -237,17 +244,31 @@ void SimpleHAPDecoderApp::setup ( )
     }
 }
 
+const uint32_t kHAP1 = 'Hap1';
+const uint32_t kHAP5 = 'Hap5';
+const uint32_t kHAP7 = 'Hap7';
+const uint32_t kHAPY = 'HapY';
+const uint32_t kHAPM = 'HapM';
+const uint32_t kJPEG = 'jpeg';
+
 bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
     try
     {
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties(true).PreloadIntoMemory(true) );
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )
             {
                 _movie = AX::Movie::Create ( _mp4 );
                 _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
+                _track->RegisterDecoder<HAPDecoder> ( kHAP1 );
+                _track->RegisterDecoder<HAPDecoder> ( kHAP5 );
+                _track->RegisterDecoder<HAPDecoder> ( kHAP7 );
+                _track->RegisterDecoder<HAPDecoder> ( kHAPY );
+                _track->RegisterDecoder<HAPDecoder> ( kHAPM );
+                _track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
+                
                 _mp4->Dump ( std::cout, true );
 
                 _currentSample = 0;
@@ -271,6 +292,13 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 void SimpleHAPDecoderApp::update ( )
 {
     float dt = ui::GetIO ( ).DeltaTime;
+    static float kAccum = 0.0f;
+    kAccum += dt;
+    if ( kAccum > getFpsSampleInterval() )
+    {
+        kAccum = 0.0f;
+        _fpsHistory.push_back ( getAverageFps ( ) );
+    }
 
     if ( _track )
     {
@@ -292,184 +320,57 @@ void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
     LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
 }
 
-const uint32_t kHAP1 = 'Hap1';
-const uint32_t kHAP5 = 'Hap5';
-const uint32_t kHAP7 = 'Hap7';
-const uint32_t kHAPY = 'HapY';
-const uint32_t kHAPM = 'HapM';
-const uint32_t kJPEG = 'jpeg';
-
-inline bool IsHapHandler ( uint32_t type )
+void SimpleHAPDecoderApp::DecodeFrameAt ( int index )
 {
-    switch ( type )
-    {
-        case kHAP1:
-        case kHAP5:
-        case kHAP7:
-        case kHAPY:
-        case kHAPM:
-        {
-            return true;
-        }    
-    }
+    if ( !_track ) return;
 
-    return false;
+    if ( _async )
+    {
+        DecodeFrameAtAsync ( index );
+    } else
+    {
+        OnSampleDecoded ( _track->DecodeSample ( index ) );
+    }
 }
 
-gl::Texture2dRef HapDecodeFrameAt ( uint32_t index, uint32_t handler, uint32_t width, uint32_t height, const uint8_t* sampleData, unsigned long sampleDataLength )
+void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::ITrackDecoderRef& decoder )
 {
-    unsigned long uncompressedLen = ( ( width + 3 ) / 4 ) * ( ( height + 3 ) / 4 ) * 8;
+    assert ( app::isMainThread ( ) );
+
+    if ( !decoder ) return;
+    _decoded = decoder;
     
-    uint32_t format{ 0 };
-    uint32_t status = HapGetFrameTextureFormat ( sampleData, sampleDataLength, 0, &format );
+    _YCoCgPlane = nullptr;
+    _alphaPlane = nullptr;
+    _frame = nullptr;
 
-    unsigned long actualSize{ 0 };
-    static std::vector<uint8_t> decompressed;
-
-    auto DecodeCallback = []( HapDecodeWorkFunction function, void* p, uint32_t count, void* )
+    if ( _decoded->FrameCount ( ) == 2 )
     {
-        std::printf ( "DecodeCallback: %d\n", count );
-        for ( uint32_t i = 0; i < count; i++ )
+        _YCoCgPlane = _decoded->CreateTexture ( 0 );
+        _alphaPlane = _decoded->CreateTexture ( 1 );
+        _decodeTimeHistory.push_back ( _decoded->FrameAt ( 0 ).DecodeTime + _decoded->FrameAt ( 1 ).DecodeTime );
+    } else
+    {
+        if ( _decoded->Handler ( ) == kHAPY )
         {
-            function ( p, i );
+            _YCoCgPlane = _decoded->CreateTexture ( 0 );
+        } else
+        {
+            _frame = _decoded->CreateTexture ( 0 );
         }
-    };
 
-    uint32_t chunks{ 0 };
-    status = HapMaxEncodedLength ( 1, &uncompressedLen, &format, &chunks );
-    std::printf ( "HapMaxEncodedLength(%d) = %lu\n", status, uncompressedLen );
-    uncompressedLen *= 2;
-
-    if ( decompressed.size ( ) < uncompressedLen )
-    {
-        std::printf ( "Resizing decompress buffer: %d\n", uncompressedLen );
-        decompressed.resize ( uncompressedLen );
+        _decodeTimeHistory.push_back ( _decoded->FrameAt ( 0 ).DecodeTime );
     }
-
-    status = HapDecode ( sampleData, sampleDataLength, index, DecodeCallback, nullptr, decompressed.data ( ), uncompressedLen, &actualSize, &format );
-    std::printf ( "DecodeStatus: %d\n", status );
-    if ( status == HapResult_No_Error )
-    {
-        std::printf ( "HapFormat: %x\n", format );
-        GLenum glFormat = 0;
-
-        switch ( format )
-        {
-            case HapTextureFormat_RGB_DXT1:
-            {
-                glFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
-                break;
-            }
-
-            case HapTextureFormat_RGBA_DXT5:
-            {
-                glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-                break;
-            }
-
-            case HapTextureFormat_A_RGTC1:
-            {
-                glFormat = GL_COMPRESSED_RED_RGTC1_EXT;
-                break;
-            }
-
-            case HapTextureFormat_YCoCg_DXT5:
-            {
-                glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-                break;
-            }
-
-            case HapTextureFormat_RGBA_BPTC_UNORM:
-            {
-                glFormat = GL_COMPRESSED_RGBA_BPTC_UNORM;
-                break;
-            }
-        }
-
-        if ( glFormat != 0 )
-        {
-            GLuint texId{ 0 };
-            GLenum target = GL_TEXTURE_2D;
-
-            glGenTextures ( 1, &texId );
-            glHint ( GL_TEXTURE_COMPRESSION_HINT, GL_NICEST );
-
-            gl::ScopedTextureBind tex0{ target, texId };
-            glCompressedTexImage2D ( target, 0, glFormat, width, height, 0, actualSize, decompressed.data ( ) );
-
-            auto tex = gl::Texture::create ( target, texId, width, height, false );
-            tex->setMinFilter ( GL_LINEAR );
-            tex->setMagFilter ( GL_LINEAR );
-            tex->setLabel ( AX::FourCCToString ( handler ) );
-            CI_CHECK_GL ( );
-            std::printf ( "ok!\n" );
-            return tex;
-        }
-    }
-
-    return nullptr;
+    
 }
 
-bool SimpleHAPDecoderApp::DecodeFrameAt ( int index )
+void SimpleHAPDecoderApp::DecodeFrameAtAsync ( int index )
 {
-    AX::Sample sample{};
-    if ( _track && _track->ReadSample ( index, sample ) )
+    if ( !_track ) return;
+    _track->DecodeSampleAsync ( index, [=]( uint32_t, bool succeeded, const AX::ITrackDecoderRef& decoded )
     {
-        Timer timer{ true };
-
-        std::printf ( "read sample %d %lu (%s)\n", index, sample.Length ( ), AX::FourCCToString ( sample.Handler ( ) ).c_str ( ) );
-
-        if ( sample.Handler ( ) == kJPEG )
-        {
-            try
-            {
-                auto stream = IStreamMem::create ( sample.Data ( ), sample.Length ( ) );
-                auto image = loadImage ( DataSourceBuffer::create ( loadStreamBuffer ( stream ) ), ImageSource::Options ( ), "jpg" );
-                _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
-
-                _YCoCgPlane = nullptr;
-                _alphaPlane = nullptr;
-                _frame = gl::Texture::create ( image, gl::Texture::Format ( ).label ( AX::FourCCToString ( sample.Handler ( ) ) ) );
-                return true;
-            } catch ( const std::exception& e )
-            {
-                std::printf ( "err %s\n", e.what ( ) );
-                return false;
-            }
-        } else if ( IsHapHandler ( sample.Handler ( ) ) )
-        {
-            uint32_t textureCount{ 0 };
-            if ( HapGetFrameTextureCount ( sample.Data ( ), sample.Length ( ), &textureCount ) == HapResult_No_Error && textureCount > 0 )
-            {
-                if ( textureCount == 2 )
-                {
-                    _frame = nullptr;
-                    _YCoCgPlane = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
-                    _alphaPlane = HapDecodeFrameAt ( 1, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
-                    _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
-
-                    if ( _YCoCgPlane && _alphaPlane ) return true;
-                    return false;
-                } else
-                {
-                    _YCoCgPlane = nullptr;
-                    _alphaPlane = nullptr;
-                    _frame = nullptr;
-
-                    if ( sample.Handler ( ) == kHAPY )
-                    {
-                        _YCoCgPlane = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
-                    } else
-                    {
-                        _frame = HapDecodeFrameAt ( 0, sample.Handler ( ), _track->Width ( ), _track->Height ( ), sample.Data ( ), sample.Length ( ) );
-                    }
-                    _decodeTimeHistory.push_back ( static_cast<float> ( timer.getSeconds ( ) ) );
-                    if ( _frame ) return true;
-                }
-            }
-        }
-    }
-    return false;
+        if ( succeeded ) OnSampleDecoded ( decoded );
+    } );
 }
 
 static void Inspect ( AX::Atom* atom )
@@ -510,6 +411,7 @@ void SimpleHAPDecoderApp::draw ( )
             if ( _YCoCgPlane ) handler = _YCoCgPlane->getLabel ( );
             ui::Text ( "%s | %d x %d", handler.c_str(), _track->Width ( ), _track->Height ( ) );
             ui::Text ( "%d samples parsed | %.2f/%.2f", _track->SampleCount ( ), _time, _track->DurationSeconds ( ) );
+            ui::Checkbox ( "Async", &_async );
 
             if ( _playRate == 0.0f )
             {
@@ -549,6 +451,20 @@ void SimpleHAPDecoderApp::draw ( )
             ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
         }
 
+        if ( !_fpsHistory.empty ( ) )
+        {
+            std::vector<float> samples{};
+            samples.reserve ( _fpsHistory.size ( ) );
+
+            for ( auto& sample : _fpsHistory )
+            {
+                samples.push_back ( sample );
+            }
+
+            ui::Text ( "FPS History" );
+            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, getFrameRate(), ImVec2 ( 0, 32 ) );
+        }
+
         if ( _mp4 ) Inspect ( _mp4.get ( ) );
     }
 
@@ -582,7 +498,7 @@ void Init ( App::Settings* settings )
 {
     settings->setWindowSize ( 1280, 720 );
 #ifdef CINDER_MSW
-    settings->setConsoleWindowEnabled ( true );
+    settings->setConsoleWindowEnabled ( false );
 #endif
 }
 

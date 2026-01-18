@@ -34,7 +34,7 @@ include("${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake")
 set(THE_BLOCKS "AX-MP4")
 
 ci_make_app(
-	SOURCES "${APP_PATH}/src/SimpleHAPDecoderApp.cxx"
+	SOURCES "${APP_PATH}/src/SimpleHAPDecoderApp.cxx" "${APP_PATH}/src/Decoders.cxx" "${APP_PATH}/src/Decoders.h"
 	CINDER_PATH ${CINDER_PATH}
 	BLOCKS ${THE_BLOCKS}
 )

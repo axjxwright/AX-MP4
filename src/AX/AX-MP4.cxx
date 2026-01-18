@@ -9,6 +9,7 @@
 #include "AX-MP4.h"
 #include "cinder/CinderAssert.h"
 #include "cinder/DataSource.h"
+#include "cinder/app/App.h"
 #include <sstream>
 
 using namespace ci;
@@ -48,12 +49,64 @@ namespace AX
         return ss.str ( );
     }
 
+    AtomRef BaseContainerAtom::FindFirstChild ( AtomType type, bool recursive ) const
+    {
+        for ( auto& child : _children )
+        {
+            if ( child->Type ( ) == type ) return child;
+        }
+
+        if ( recursive )
+        {
+            for ( auto& child : _children )
+            {
+                if ( child->IsContainer ( ) )
+                {
+                    if ( auto result = child->TryCast<IContainerAtom> ( )->FindFirstChild ( type, recursive ) )
+                    {
+                        return result;
+                    }
+                }
+            }
+        }
+
+        return nullptr;
+    }
+
+    AtomList BaseContainerAtom::FindChildren ( AtomType type, bool recursive ) const
+    {
+        std::vector<AtomRef> children;
+        for ( auto& child : _children )
+        {
+            if ( child->Type ( ) == type )
+            {
+                children.push_back ( child );
+            }
+        }
+
+        if ( recursive )
+        {
+            for ( auto& child : _children )
+            {
+                if ( child->IsContainer ( ) )
+                {
+                    if ( auto container = child->TryCast<IContainerAtom> ( ) )
+                    {
+                        auto result = container->FindChildren ( type, recursive );
+                        children.insert ( children.end ( ), result.begin ( ), result.end ( ) );
+                    }
+                }
+            }
+        }
+        return children;
+    }
+
     void ContainerAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
     {
         auto streamStart = stream->tell ( );
         auto streamSize = stream->size ( );
         
-        SetInfo ( { context.StackDepth ( ), expectedLength } );
+        SetInfo ( { context.StackDepth ( ), expectedLength, streamStart } );
         context.Push ( this );
         
         bool done = false;
@@ -114,55 +167,6 @@ namespace AX
         context.Pop ( );
     }
 
-    AtomRef ContainerAtom::FindFirstChild ( AtomType type, bool recursive ) const
-    {
-        for ( auto& child : _children )
-        {
-            if ( child->Type ( ) == type ) return child;
-        }
-
-        if ( recursive )
-        {
-            for ( auto& child : _children )
-            {
-                if ( child->IsContainer ( ) )
-                {
-                    if ( auto result = child->As<ContainerAtom>()->FindFirstChild ( type, recursive ) )
-                    {
-                        return result;
-                    }
-                }
-            }
-        }
-
-        return nullptr;
-    }
-
-    std::vector<AtomRef> ContainerAtom::FindChildren ( AtomType type, bool recursive ) const
-    {
-        std::vector<AtomRef> children;
-        for ( auto& child : _children )
-        {
-            if ( child->Type ( ) == type )
-            {
-                children.push_back ( child );
-            }
-        }
-
-        if ( recursive )
-        {
-            for ( auto& child : _children )
-            {
-                if ( child->IsContainer ( ) )
-                {
-                    auto result = child->As<ContainerAtom>()->FindChildren ( type, recursive );
-                    children.insert ( children.end ( ), result.begin ( ), result.end ( ) );
-                }
-            }
-        }
-        return children;
-    }
-    
     void FullAtom::Parse ( MP4 & context, const IStreamRef & stream, usz expectedLength )
     {
         u32 header{ };
@@ -1089,6 +1093,25 @@ namespace AX
         return nullptr;
     }
 
+    Track::AsyncContext::AsyncContext ( )
+        : Work ( Io )
+    {
+        Thread = std::thread ( [&] { Io.run ( ); } );
+    }
+    
+    Track::AsyncContext::~AsyncContext ( )
+    {
+        try
+        {
+            Io.stop ( );
+        } catch ( const std::exception& e )
+        {
+            std::printf ( "Error stopping AsyncContext: %s\n", e.what ( ) );
+        }
+
+        if ( Thread.joinable ( ) ) Thread.join ( );
+    }
+
     Track::Track ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
         : _trak ( trak )
         , _mdat ( mdat )
@@ -1147,6 +1170,89 @@ namespace AX
         }
     }
 
+    void ITrackDecoder::DecodedFrame::SetPixelData ( const ci::Surface8uRef& surface )
+    {
+        _pixelData = surface;
+        PixelBufferSize = surface->getRowBytes ( ) * surface->getHeight ( );
+        PixelBuffer = surface->getData ( );
+    }
+
+    void ITrackDecoder::DecodedFrame::SetPixelData ( const ci::Channel8uRef& channel )
+    {
+        _pixelData = channel;
+        PixelBufferSize = channel->getRowBytes ( ) * channel->getHeight ( );
+        PixelBuffer = channel->getData ( );
+    }
+
+    void ITrackDecoder::DecodedFrame::SetPixelData ( const RawBufferRef& raw )
+    {
+        _pixelData = raw;
+        PixelBufferSize = raw->size ( );
+        PixelBuffer = raw->data ( );
+    }
+
+    ITrackDecoderRef Track::CreateDecoder ( u32 handler ) const
+    {
+        auto it = _decoders.find ( handler );
+        if ( it != _decoders.end ( ) )
+        {
+            return it->second ( );
+        }
+        return nullptr;
+    }
+
+    ITrackDecoderRef Track::DecodeSample ( u32 index ) const
+    {
+        AX::Sample sample{};
+        if ( ReadSample ( index, sample ) )
+        {
+            if ( auto decoder = CreateDecoder ( sample.Handler() ) )
+            {
+                auto success = decoder->Decode ( sample );
+                decoder->_succeeded = success;
+                return decoder;
+            }
+        }
+
+        return nullptr;
+    }
+
+    void Track::DecodeSampleAsync ( u32 index, AsyncDecodeCallback callback ) const
+    {
+        if ( !_async ) _async = std::make_unique<AsyncContext> ( );
+
+        _async->Io.post ( [&, index, callback]
+        {
+            Sample sample{};
+            bool success = false;
+            ITrackDecoderRef decoder = nullptr;
+            if ( ReadSample ( index, sample ) )
+            {
+                decoder = DecodeSample ( index );
+                success = decoder != nullptr;
+            }
+
+            app::App::get ( )->dispatchAsync ( [s = success, i = index, cb = callback, dec=decoder]
+            {
+                cb ( i, s, dec );
+            } );
+        } );
+    }
+
+    void Track::ReadSampleAsync ( u32 index, AsyncReadCallback callback ) const
+    {
+        if ( !_async ) _async = std::make_unique<AsyncContext> ( );
+        _async->Io.post ( [&, index, callback]
+        {
+            Sample sample{};
+            bool success = ReadSample ( index, sample );
+            app::App::get ( )->dispatchAsync ( [s = success, i = index, cb = callback, sam = std::move ( sample )]
+            {
+                cb ( i, s, std::move(sam) );
+            } );
+        } );
+    }
+
     bool Track::ReadSample ( u32 index, Sample& sample ) const
     {
         if ( _mdat.expired() ) return false;
@@ -1189,10 +1295,10 @@ namespace AX
         {
             if ( mdat->IsZeroCopy ( ) )
             {
-                sample = Sample ( handler, mdat->ZeroCopyDataWithOffset ( static_cast<off_t>( offset ) ), sampleSize );
+                sample = Sample ( handler, mdat->ZeroCopyDataWithOffset ( static_cast<off_t>( offset ) ), sampleSize, index, Size() );
             } else
             {
-                sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>( offset ), sampleSize ) );
+                sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>( offset ), sampleSize ), index, Size() );
             }
             return true;
         }

@@ -12,6 +12,9 @@
 #include "cinder/Stream.h"
 #include "cinder/Cinder.h"
 #include "cinder/CinderGlm.h"
+#include "cinder/gl/Texture.h"
+#include <asio/asio.hpp>
+#include <thread>
 #include <functional>
 #include <unordered_map>
 #include <stack>
@@ -322,41 +325,47 @@ namespace AX
         PropertyMap _properties{};
     };
 
-    using ContainerAtomRef = std::shared_ptr<class ContainerAtom>;
-    class ContainerAtom : public Atom
+    template<typename T>
+    using AtomListT = std::vector<std::shared_ptr<T>>;
+    using AtomList = AtomListT<Atom>;
+
+    using IContainerAtomRef = std::shared_ptr<class IContainerAtom>;
+    class IContainerAtom
     {
     public:
-        ContainerAtom ( AtomType type = AtomType::kUNKN )
-            : _type ( type )
-        { }
-        
-        AtomType Type ( ) const override { return _type; }
+        virtual AtomRef         FindFirstChild ( AtomType type, bool recursive = true ) const = 0;
+        virtual AtomList        FindChildren ( AtomType type, bool recursive = true ) const = 0;
+        virtual void            AddChild ( const AtomRef& atom ) = 0;
+        virtual const AtomList& GetChildren ( ) const = 0;
+        virtual ~IContainerAtom ( ) {};
+    };
 
-        void Parse ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) override;
-        bool IsContainer ( ) const override { return true; }
+    using BaseContainerAtomRef = std::shared_ptr<class BaseContainerAtom>;
+    class BaseContainerAtom : public IContainerAtom
+    {
+    public:
+        void            AddChild ( const AtomRef& atom ) override { _children.push_back ( atom ); }
+        const AtomList& GetChildren ( ) const override { return _children; }
 
-        void AddChild ( const AtomRef& atom ) { _children.push_back ( atom ); }
-        const std::vector<AtomRef> & GetChildren ( ) const { return _children; }
-
-        AtomRef               FindFirstChild ( AtomType type, bool recursive = true ) const;
-        std::vector<AtomRef>  FindChildren ( AtomType type, bool recursive = true ) const;
+        AtomRef         FindFirstChild ( AtomType type, bool recursive = true ) const override;
+        AtomList        FindChildren ( AtomType type, bool recursive = true ) const override;
 
         template <typename T>
         std::shared_ptr<T> FindFirstChildAs ( AtomType type, bool recursive = true ) const
         {
             if ( auto child = FindFirstChild ( type, recursive ) )
             {
-                return child->TryCast<T>();
+                return child->TryCast<T> ( );
             }
 
             return nullptr;
         }
 
         template <typename T>
-        std::vector<std::shared_ptr<T>> FindChildrenAs ( AtomType type, bool recursive = true )
+        AtomListT<T> FindChildrenAs ( AtomType type, bool recursive = true )
         {
             auto children = FindChildren ( type, recursive );
-            std::vector<std::shared_ptr<T>> cast;
+            AtomListT<T> cast;
             cast.reserve ( children.size ( ) );
             for ( auto& child : children )
             {
@@ -370,7 +379,23 @@ namespace AX
         }
 
     protected:
-        std::vector<AtomRef>    _children;
+        AtomList    _children;
+    };
+
+    using ContainerAtomRef = std::shared_ptr<class ContainerAtom>;
+    class ContainerAtom : public Atom, public BaseContainerAtom
+    {
+    public:
+        ContainerAtom ( AtomType type = AtomType::kUNKN )
+            : _type ( type )
+        { }
+        
+        AtomType Type ( ) const override { return _type; }
+
+        void Parse ( MP4 & context, const ci::IStreamRef & stream, usz expectedLength ) override;
+        bool IsContainer ( ) const override { return true; }
+
+    protected:
         AtomType                _type{ AtomType::kUNKN };
     };
 
@@ -396,25 +421,40 @@ namespace AX
         AtomType    _type{ AtomType::kUNKN };  
     };
     
+    using IFullAtomRef  = std::shared_ptr<class IFullAtom>;
+    class IFullAtom
+    {
+    public:
+        virtual u8      Version ( ) const = 0;
+        virtual u32     Flags   ( ) const = 0;
+        virtual ~IFullAtom ( ) { };
+    };
+
+    using BaseFullAtomRef = std::shared_ptr<class BaseFullAtom>;
+    class BaseFullAtom : public IFullAtom
+    {
+    public:
+        BaseFullAtom ( AtomType type = AtomType::kUNKN ) : _type ( type ) {};
+        u8           Version ( ) const { return  _version; }
+        u32          Flags ( ) const { return    _flags; }
+
+    protected:
+        u8           _version{ 0 };
+        u32          _flags{ 0 };
+        AtomType     _type{ AtomType::kUNKN };
+    };
+
     using FullAtomRef = std::shared_ptr<class FullAtom>;
-    class FullAtom : public Atom
+    class FullAtom : public Atom, public BaseFullAtom
     {
     public:
         FullAtom ( AtomType type = AtomType::kUNKN )
-            : _type ( type )
+            : BaseFullAtom ( type )
         { }
 
         AtomType    Type ( ) const override { return _type; }
         void        Parse ( MP4& context, const ci::IStreamRef & stream, usz expectedLength ) override;
         bool        IsFull ( ) const override { return true; }
-        
-        u8          Version ( ) const { return _version; }
-        u32         Flags ( ) const { return _flags; }
-
-    protected:
-        u8          _version{ 0 };
-        u32         _flags{ 0 };
-        AtomType    _type{ AtomType::kUNKN };
     };
 
     using FTYPAtomRef = std::shared_ptr<class FTYPAtom>;
@@ -455,7 +495,6 @@ namespace AX
         u32         Height          ( ) const { return _height; }
     
     protected:
-
         u64         _creationTime{ 0 };
         u64         _modificationTime{ 0 };
         u32         _trackID{ 0 };
@@ -771,22 +810,31 @@ namespace AX
     {
     public:
         Sample ( ) {};
-        Sample ( u32 handler, const u8* data, u32 length )
+        Sample ( u32 handler, const u8* data, u32 length, u32 index, const ci::ivec2& size )
             : _handler ( handler )
             , _data ( data )
             , _length ( length )
             , _ownsData ( false )
+            , _index ( index )
+            , _size ( size )
         {}
-        Sample ( u32 handler, const std::vector<u8>& data )
+        Sample ( u32 handler, const std::vector<u8>& data, u32 index, const ci::ivec2& size )
             : _handler ( handler )
             , _data ( data )
             , _length ( static_cast<u32>(data.size ( )) )
             , _ownsData ( true )
+            , _index ( index )
+            , _size ( size )
         {}
 
         u32       Handler ( ) const { return _handler; }
         const u8* Data ( ) const { return _ownsData ? std::get<std::vector<u8>> ( _data ).data ( ) : std::get<const u8 *> ( _data ); }
         u32       Length ( ) const { return _length; }
+        u32       Index ( ) const { return _index; }
+
+        const ci::ivec2& Dimensions ( ) const { return _size; }
+        u32          Width ( ) const { return _size.x; }
+        u32          Height ( ) const { return _size.y; }
 
     protected:
 
@@ -795,6 +843,8 @@ namespace AX
         int             _handler{ 0 };
         u32             _length{ 0 };
         bool            _ownsData{ false };
+        u32             _index{ 0 };
+        ci::ivec2       _size;
         DataUnion       _data;
     };
 
@@ -812,14 +862,77 @@ namespace AX
     /// Convenience Playback API
     /// 
     
+    using ITrackDecoderRef = std::shared_ptr<class ITrackDecoder>;
+    class ITrackDecoder : public std::enable_shared_from_this<ITrackDecoder>
+    {
+    public:
+        friend class Track;
+        using RawBufferRef      = std::shared_ptr<std::vector<u8>>;
+        struct DecodedFrame
+        {
+            u32                 Index{ 0 };
+            u32                 GPUFormat{ GL_RGBA };
+            bool                IsCompressed{ false };
+            u32                 Width{ 0 };
+            u32                 Height{ 0 };
+            float               DecodeTime{ 0.0f };
+            u32                 Channels{ 0 };
+            
+            u64                 PixelBufferSize{ 0 };
+            const u8*           PixelBuffer{ nullptr };
+            
+            void                SetPixelData ( const ci::Surface8uRef& surface );
+            void                SetPixelData ( const ci::Channel8uRef& channel );
+            void                SetPixelData ( const RawBufferRef& raw );
+
+        protected:
+
+            std::variant<ci::Surface8uRef, ci::Channel8uRef, RawBufferRef> _pixelData;
+        };
+
+        ITrackDecoder               ( u32 handler ) : _handler ( handler ) {}
+        virtual ~ITrackDecoder      ( ) {};
+
+        u32                         Handler ( ) const { return _handler; }
+        virtual u32                 FrameCount ( ) const { return static_cast<u32>(_decodedFrames.size ( )); }
+        virtual const DecodedFrame& FrameAt ( u32 index ) const { return _decodedFrames.at ( index ); }
+
+        virtual bool                DecodeSucceeded ( ) const { return _succeeded; }
+        virtual bool                Decode ( const Sample& sample ) = 0;
+        virtual ci::gl::TextureRef  CreateTexture ( u32 index, const ci::gl::Texture::Format& fmt = ci::gl::Texture::Format ( ) ) const = 0;
+
+    protected:
+        std::vector<DecodedFrame>   _decodedFrames;
+        u32                         _handler{ 0 };
+        bool                        _succeeded{ false };
+    };
+   
     using TrackRef          = std::shared_ptr<class Track>;
     class Track             : public std::enable_shared_from_this<Track>
     {
     public:
+        using AsyncReadCallback = std::function<void ( u32, bool, const Sample&& )>;
+        using AsyncDecodeCallback = std::function<void ( u32, bool, const ITrackDecoderRef& )>;
+        
         Track               ( const MDATAtomRef& mdat, const ContainerAtomRef& trak );
         
         TrackType           Type ( ) const;
+
+        ITrackDecoderRef    DecodeSample ( u32 index ) const;
+        void                DecodeSampleAsync ( u32 index, AsyncDecodeCallback callback ) const;
+        
         bool                ReadSample ( u32 index, Sample& sample ) const;
+        void                ReadSampleAsync ( u32 index, AsyncReadCallback callback ) const;
+        
+        template <typename T>
+        void                RegisterDecoder ( u32 handler )
+        {
+            _decoders[handler] = [=] { return std::make_shared<T> ( handler ); };
+        }
+
+        ITrackDecoderRef    CreateDecoder ( u32 handler ) const;
+        bool                HasDecoder ( u32 handler ) const { return _decoders.count ( handler ); }
+
         u32                 SampleCount ( ) const;
         float               DurationSeconds ( ) const;
 
@@ -829,19 +942,37 @@ namespace AX
 
     protected:
 
+        class AsyncContext
+        {
+        public:
+            std::thread         Thread;
+            asio::io_context    Io;
+            asio::io_context::work Work;
+
+            AsyncContext ( );
+            ~AsyncContext ( );
+        };
+        using AsyncContextRef = std::unique_ptr<class AsyncContext>;
+        
         template <typename T> 
         using Weak = std::weak_ptr<T>;
 
-        Weak<ContainerAtom> _trak{ };
-        Weak<STSZAtom>      _stsz{ };
-        Weak<STCOAtom>      _stco{ };
-        Weak<STSCAtom>      _stsc{ };
-        Weak<STSDAtom>      _stsd{ };
-        Weak<MDATAtom>      _mdat{ };
-        Weak<HDLRAtom>      _hdlr{ };
-        Weak<MDHDAtom>      _mdhd{ };
+        Weak<ContainerAtom>     _trak{ };
+        Weak<STSZAtom>          _stsz{ };
+        Weak<STCOAtom>          _stco{ };
+        Weak<STSCAtom>          _stsc{ };
+        Weak<STSDAtom>          _stsd{ };
+        Weak<MDATAtom>          _mdat{ };
+        Weak<HDLRAtom>          _hdlr{ };
+        Weak<MDHDAtom>          _mdhd{ };
 
-        glm::ivec2          _size;
+        glm::ivec2              _size;
+        mutable AsyncContextRef _async;
+
+        using DecoderFactory    = std::function<ITrackDecoderRef()>;
+        using DecoderFactoryMap = std::unordered_map<u32, DecoderFactory>;
+
+        DecoderFactoryMap       _decoders;
     };
 
     using MovieRef = std::shared_ptr<class Movie>;
