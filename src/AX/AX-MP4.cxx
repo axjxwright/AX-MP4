@@ -1093,14 +1093,8 @@ namespace AX
         return nullptr;
     }
 
-    #if CINDER_VERSION > 903
-	#define MAKE_IO_WORK(x) asio::make_work_guard(x)
-    #else
-	#define MAKE_IO_WORK(x) x
-    #endif
-
     Track::AsyncContext::AsyncContext ( )
-        : Work ( MAKE_IO_WORK(Io) )
+        : Work ( asio::make_work_guard ( Io ) )
     {
         Thread = std::thread ( [&] { Io.run ( ); } );
     }
