@@ -56,8 +56,21 @@ gl::TextureRef MJPEGDecoder::CreateTexture ( AX::u32 index, const gl::Texture::F
 
 bool HAPDecoder::Decode ( const AX::Sample& sample )
 {
-    unsigned long uncompressedLen = ( ( sample.Width() + 3 ) / 4 ) * ( ( sample.Height() + 3 ) / 4 ) * 8;
+    auto EstimateUncompressedLength = [&] ( HapTextureFormat format )
+    {
+        auto RoundUp = []( int size )
+        {
+            if ( ( size & 3 ) != 0 ) size = ( size + 3 ) & ~3;
+            return size;
+        };
 
+        auto length = RoundUp ( sample.Width ( ) ) * RoundUp ( sample.Height ( ) );
+        if ( format == HapTextureFormat_RGB_DXT1 ) length /= 2;
+        return length;
+    };
+
+    unsigned long uncompressedLength = ( ( sample.Width() + 3 ) / 4 ) * ( ( sample.Height() + 3 ) / 4 ) * 8;
+    
     auto* sampleData = sample.Data ( );
     auto sampleDataLength = sample.Length ( );
 
@@ -66,12 +79,26 @@ bool HAPDecoder::Decode ( const AX::Sample& sample )
     uint32_t textureCount = 0;
     HAP_RETURN_IF_FAILED ( HapGetFrameTextureCount ( sampleData, sampleDataLength, &textureCount ) );
     
+    if ( textureCount > 2 )
+    {
+        std::printf ( "HAP: Unexpected texture count: %d. Capping to 2\n", textureCount );
+        textureCount = 2;
+    }
+    
+    unsigned int chunks[2] = {};
+    unsigned int formats[2] = {};
+    unsigned long bufferSizes[2] = { uncompressedLength, uncompressedLength };
+
+    for ( uint32_t i = 0; i < textureCount; i++ )
+    {
+        // @NOTE(andrew): Inconsistent HAP api here :/
+        HAP_RETURN_IF_FAILED ( HapGetFrameTextureChunkCount ( sampleData, sampleDataLength, i, reinterpret_cast<int*> ( chunks ) ) );
+        HAP_RETURN_IF_FAILED ( HapGetFrameTextureFormat ( sampleData, sampleDataLength, i, formats ) );
+    }
+
     for ( uint32_t index = 0; index < textureCount; index++ )
     {
         Timer timer{ true };
-
-        uint32_t format{ 0 };
-        uint32_t status = HapGetFrameTextureFormat ( sampleData, sampleDataLength, index, &format );
 
         unsigned long actualSize{ 0 };
         auto DecodeCallback = []( HapDecodeWorkFunction function, void* p, uint32_t count, void* )
@@ -83,28 +110,30 @@ bool HAPDecoder::Decode ( const AX::Sample& sample )
             }
         };
 
-        uint32_t chunks{ 0 };
-        HAP_RETURN_IF_FAILED ( HapMaxEncodedLength ( 1, &uncompressedLen, &format, &chunks ) );
-        std::printf ( "HapMaxEncodedLength(%d) = %lu\n", status, uncompressedLen );
-        uncompressedLen *= 2;
-
         DecodedFrame frame{};
         frame.Index = index;
         frame.Width = sample.Width ( );
         frame.Height = sample.Height ( );
         frame.IsCompressed = true;
-
-        auto buffer = std::make_shared<std::vector<AX::u8>> ( );
-        buffer->resize ( uncompressedLen );
         
-        HAP_RETURN_IF_FAILED ( HapDecode ( sampleData, sampleDataLength, index, DecodeCallback, nullptr, buffer->data ( ), uncompressedLen, &actualSize, &format ) );
+        unsigned long estimate = EstimateUncompressedLength ( static_cast<HapTextureFormat>(formats[index]) );
+        auto buffer = std::make_shared<std::vector<AX::u8>> ( );
+        buffer->resize ( estimate );
+        
+        uint32_t format{};
+        uint32_t status = HapDecode ( sampleData, sampleDataLength, index, DecodeCallback, nullptr, buffer->data ( ), estimate, &actualSize, &format );
+        while ( status == HapResult_Buffer_Too_Small )
+        {
+            estimate = static_cast<unsigned long> ( static_cast<double> ( estimate ) * 2 );
+            buffer->resize ( estimate );
+            status = HapDecode ( sampleData, sampleDataLength, index, DecodeCallback, nullptr, buffer->data ( ), estimate, &actualSize, &format );
+        }
+
+        if ( status != HapResult_No_Error ) return false;
+
         buffer->resize ( actualSize );
         assert ( buffer->size ( ) == actualSize );
-
-        std::printf ( "DecodeStatus: %d\n", status );
-        if ( status == HapResult_No_Error )
         {
-            std::printf ( "HapFormat: %x\n", format );
             GLenum glFormat = 0;
             
             switch ( format )
@@ -179,13 +208,13 @@ gl::TextureRef HAPDecoder::CreateTexture ( AX::u32 index, const gl::Texture::For
 
     gl::ScopedTextureBind tex0{ target, texId };
     glCompressedTexImage2D ( target, 0, decoded.GPUFormat, decoded.Width, decoded.Height, 0, static_cast<GLsizei>(decoded.PixelBufferSize), decoded.PixelBuffer );
-
+    
     auto tex = gl::Texture::create ( target, texId, decoded.Width, decoded.Height, false );
     tex->setMinFilter ( fmt.getMinFilter() );
     tex->setMagFilter ( fmt.getMagFilter() );
+    tex->setWrap ( fmt.getWrapS ( ), fmt.getWrapT ( ), fmt.getWrapR ( ) );
     tex->setLabel ( AX::FourCCToString ( Handler() ) );
-    CI_CHECK_GL ( );
-    std::printf ( "ok!\n" );
-    return tex;
     
+    CI_CHECK_GL ( );
+    return tex;   
 }

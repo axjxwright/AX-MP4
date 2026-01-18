@@ -25,10 +25,12 @@ namespace ui = ImGui;
 using namespace ci;
 using namespace ci::app;
 
+#ifdef CINDER_MSW
 extern "C"
 {
-    __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x1;
+    __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x0;
 }
+#endif
 
 #if AX_LIVEPP_ENABLED
 #include "LPP_API_x64_CPP.h"
@@ -80,7 +82,6 @@ namespace AX
         } kLivePP;
     }
 }
-
 #else
 namespace AX { static void InitLivePP ( ) {} };
 #endif
@@ -253,9 +254,10 @@ const uint32_t kJPEG = 'jpeg';
 
 bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
-    try
+    //try
     {
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
+        _frame = _YCoCgPlane = _alphaPlane = nullptr;
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )
@@ -281,10 +283,10 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
                 std::printf ( "Error loading MP4: %s\n", AX::MP4ErrorCodeToString ( _mp4->Error ( ) ) );
             }
         }
-    } catch ( const std::exception& e )
+    }/* catch ( const std::exception& e )
     {
         std::printf ( "Error loading MP4: %s\n", e.what ( ) );
-    }
+    }*/
 
     return false;
 }
@@ -337,7 +339,7 @@ void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::ITrackDecoderRef& decoder 
 {
     assert ( app::isMainThread ( ) );
 
-    if ( !decoder ) return;
+    if ( !decoder || decoder->FrameCount() == 0 ) return;
     _decoded = decoder;
     
     _YCoCgPlane = nullptr;
@@ -361,7 +363,6 @@ void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::ITrackDecoderRef& decoder 
 
         _decodeTimeHistory.push_back ( _decoded->FrameAt ( 0 ).DecodeTime );
     }
-    
 }
 
 void SimpleHAPDecoderApp::DecodeFrameAtAsync ( int index )
@@ -498,7 +499,7 @@ void Init ( App::Settings* settings )
 {
     settings->setWindowSize ( 1280, 720 );
 #ifdef CINDER_MSW
-    settings->setConsoleWindowEnabled ( false );
+    settings->setConsoleWindowEnabled ( true );
 #endif
 }
 
