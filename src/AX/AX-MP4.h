@@ -942,13 +942,19 @@ namespace AX
 
     protected:
 
+        #if CINDER_VERSION > 903
+        using AsioWork = asio::executor_work_guard<asio::io_context::executor_type>;
+        #else
+        using AsioWork = asio::io_context::work;
+        #endif
+
         class AsyncContext
         {
         public:
             std::thread         Thread;
             asio::io_context    Io;
-            asio::io_context::work Work;
-
+            AsioWork            Work;
+            
             AsyncContext ( );
             ~AsyncContext ( );
         };

@@ -1093,8 +1093,14 @@ namespace AX
         return nullptr;
     }
 
+    #if CINDER_VERSION > 903
+	#define MAKE_IO_WORK(x) asio::make_work_guard(x)
+    #else
+	#define MAKE_IO_WORK(x) x
+    #endif
+
     Track::AsyncContext::AsyncContext ( )
-        : Work ( Io )
+        : Work ( MAKE_IO_WORK(Io) )
     {
         Thread = std::thread ( [&] { Io.run ( ); } );
     }
@@ -1221,7 +1227,7 @@ namespace AX
     {
         if ( !_async ) _async = std::make_unique<AsyncContext> ( );
 
-        _async->Io.post ( [&, index, callback]
+        asio::post(_async->Io, [&, index, callback]
         {
             Sample sample{};
             bool success = false;
@@ -1242,7 +1248,7 @@ namespace AX
     void Track::ReadSampleAsync ( u32 index, AsyncReadCallback callback ) const
     {
         if ( !_async ) _async = std::make_unique<AsyncContext> ( );
-        _async->Io.post ( [&, index, callback]
+		asio::post(_async->Io, [&, index, callback]
         {
             Sample sample{};
             bool success = ReadSample ( index, sample );
