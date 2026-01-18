@@ -14,11 +14,9 @@
 #include "cinder/gl/gl.h"
 
 #include "cinder/CinderImGui.h"
-#include "cinder/Breakpoint.h"
 
 #include <iostream>
 #include "circular/circular.h"
-#include "cinder/ConcurrentCircularBuffer.h"
 
 namespace ui = ImGui;
 
@@ -28,7 +26,7 @@ using namespace ci::app;
 #ifdef CINDER_MSW
 extern "C"
 {
-    __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x0;
+    __declspec( dllexport ) unsigned int NvOptimusEnablement = 0x1;
 }
 #endif
 
@@ -257,7 +255,7 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )

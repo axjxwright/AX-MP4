@@ -7,7 +7,7 @@
 //
 
 #include "AX-MP4.h"
-#include "cinder/CinderAssert.h"
+#include "cinder/Utilities.h"
 #include "cinder/DataSource.h"
 #include "cinder/app/App.h"
 #include <sstream>
@@ -1096,7 +1096,11 @@ namespace AX
     Track::AsyncContext::AsyncContext ( )
         : Work ( asio::make_work_guard ( Io ) )
     {
-        Thread = std::thread ( [&] { Io.run ( ); } );
+        Thread = std::thread ( [&] 
+        { 
+            setThreadName ( "AX::MP4::TrackDecoder" ); 
+            Io.run ( ); 
+        } );
     }
     
     Track::AsyncContext::~AsyncContext ( )
