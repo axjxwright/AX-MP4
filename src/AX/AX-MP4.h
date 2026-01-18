@@ -272,8 +272,9 @@ namespace AX
 
         struct AtomInfo
         {
-            u32 Depth{};
-            usz Size{};
+            u32     Depth{};
+            usz     Size{};
+            off_t   Offset{};
         };
 
         virtual ~Atom ( )   {};
@@ -345,7 +346,7 @@ namespace AX
         {
             if ( auto child = FindFirstChild ( type, recursive ) )
             {
-                return child->As<T>();
+                return child->TryCast<T>();
             }
 
             return nullptr;
@@ -359,7 +360,10 @@ namespace AX
             cast.reserve ( children.size ( ) );
             for ( auto& child : children )
             {
-                cast.push_back ( child->As<T>() );
+                if ( auto is = child->TryCast<T> ( ) )
+                {
+                    cast.push_back ( is );
+                }
             }
 
             return cast;
@@ -391,7 +395,7 @@ namespace AX
     protected:
         AtomType    _type{ AtomType::kUNKN };  
     };
-
+    
     using FullAtomRef = std::shared_ptr<class FullAtom>;
     class FullAtom : public Atom
     {
@@ -528,8 +532,6 @@ namespace AX
         bool                IsZeroCopy ( ) const { return _isZeroCopy; }
 
     protected:
-        //const u8 *          Data ( ) const { return _stream ? reinterpret_cast<const u8 *>(_stream->getData()) : _data.data(); }
-        
         
         std::vector<u8>     _data;
         ci::IStreamRef      _stream;
@@ -540,7 +542,7 @@ namespace AX
     };
 
     using STSDAtomRef = std::shared_ptr<class STSDAtom>;
-    class STSDAtom : public FullAtom
+    class STSDAtom : public ContainerAtom
     {
     public:
         AtomType Type ( ) const override { return AtomType::kSTSD; }
@@ -667,6 +669,27 @@ namespace AX
         
     protected:
         std::vector<Chunk>  _chunks;
+    };
+
+    using ExtensionAtomRef = std::shared_ptr<class ExtensionAtom>;
+    class ExtensionAtom : public ContainerAtom
+    {
+    public:
+        ExtensionAtom   ( AtomType type ) : ContainerAtom ( type ) {};
+        void            Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
+
+    protected:
+        u16         _dataReferenceIndex{ 0 };
+        u8          _reserved[6]{};
+    };
+
+    using MP4AExtensionAtomRef = std::shared_ptr<class MP4AExtensionAtom>;
+    class MP4AExtensionAtom : public ExtensionAtom
+    {
+    public:
+        using ExtensionAtom::ExtensionAtom;
+        AtomType    Type ( ) const override { return AtomType::kMP4A; }
+        void        Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
     };
 
     using ESDSAtomRef = std::shared_ptr<class ESDSAtom>;

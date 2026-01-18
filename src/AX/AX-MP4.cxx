@@ -84,8 +84,7 @@ namespace AX
             {
                 try
                 {
-
-                    atom->SetInfo ( { context.StackDepth ( ), actualLength } );
+                    atom->SetInfo ( { context.StackDepth ( ), actualLength, stream->tell() } );
                     atom->Parse ( context, stream, actualLength );
 
                     AddChild ( atom );
@@ -490,9 +489,18 @@ namespace AX
         std::vector<u8> data; 
         data.resize ( size );
         
-        _stream->seekAbsolute ( offset - _offsetFromStartOfFile );
-        _stream->readData ( data.data ( ), size );
-        
+        try
+        {
+            _stream->seekAbsolute ( offset - _offsetFromStartOfFile );
+            _stream->readData ( data.data ( ), size );
+        } catch ( const std::exception& e )
+        {
+            std::printf ( "Error reading from MDAT: %s\n", e.what ( ) );
+            size -= offset;
+
+            _stream->seekAbsolute ( offset - _offsetFromStartOfFile );
+            _stream->readData ( data.data ( ), size );
+        }
         return data;
     }
 
@@ -511,10 +519,15 @@ namespace AX
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
-            FullAtom::Parse ( context, stream, 4 );
+            FullAtom header{};
+            header.Parse ( context, stream, 4 );
 
             u32 entryCount;
             stream->readBig<u32> ( &entryCount );
+            
+            u32 nextLength{ 0 };
+            stream->readBig<u32> ( &nextLength );
+            stream->seekRelative ( -static_cast<off_t>(sizeof ( u32 )) );
             
             for ( u32 i = 0; i < entryCount; i++ )
             {
@@ -758,12 +771,62 @@ namespace AX
         return false;
     }
 
+    void ExtensionAtom::Parse ( MP4&, const ci::IStreamRef& stream, usz expectedLength )
+    {
+        off_t delta{ 0 };
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            stream->seekRelative ( 6 );
+            stream->readBig<u16> ( &_dataReferenceIndex );
+        }
+        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+    }
+
+    void MP4AExtensionAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
+    {
+        off_t delta{ 0 };
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            ExtensionAtom::Parse ( context, stream, 8 );
+
+            off_t delta2{ 0 };
+            {
+                StreamAutoAdvancer adv2{ stream, delta2 };
+                u32 reserved2[2];
+                u16 reserved3;
+                u16 reserved4;
+                u32 reserved5;
+                u16 timeScale;
+                u16 reserved6;
+                
+                stream->readData ( &reserved2, 2 * sizeof ( u32 ) );
+                stream->readBig ( &reserved3 );
+                stream->readBig ( &reserved4 );
+                stream->readBig ( &reserved5 );
+                stream->readBig ( &timeScale );
+                stream->readBig ( &reserved6 );
+
+                // @FIXME(andrew): Need to work out when this is required
+                // Something to do with QT specific data
+                stream->seekRelative ( 4 * sizeof ( u32 ) );
+            }
+
+            ContainerAtom::Parse ( context, stream, expectedLength - delta2 - 8 );
+        }
+        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+    }
+
     void ESDSAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
     {
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
             FullAtom::Parse ( context, stream, 4 );
+
+            u8 objectType{ 0 };
+            stream->readBig<u8> ( &objectType );
+
+            // @TODO(andrew): Read the Elementary Stream Descriptor table
 
             if ( context.Settings ( ).TracksProperties ( ) )
             {
@@ -856,7 +919,7 @@ namespace AX
         RegisterAtomFactory ( AtomType::kIPMA, [=] { return std::make_shared<FullAtom> ( AtomType::kIPMA ); } );
         RegisterAtomFactory ( AtomType::kPIXI, [=] { return std::make_shared<FullAtom> ( AtomType::kPIXI ); } );
         RegisterAtomFactory ( AtomType::kIPCO, [=] { return std::make_shared<UnknownAtom> ( AtomType::kIPCO ); } );
-        RegisterAtomFactory ( AtomType::kSTSD, [=] { return std::make_shared<STSDAtom> ( ); } );
+        RegisterAtomFactory ( AtomType::kSTSD, [=] { return std::make_shared<STSDAtom> (); } );
         RegisterAtomFactory ( AtomType::kSTSZ, [=] { return std::make_shared<STSZAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kSTCO, [=] { return std::make_shared<STCOAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kSTSC, [=] { return std::make_shared<STSCAtom> ( ); } );
@@ -866,6 +929,8 @@ namespace AX
         RegisterAtomFactory ( AtomType::kSCHM, [=] { return std::make_shared<FullAtom> ( AtomType::kSCHM ); } );
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
         RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kAVC1 ); } );
+        //RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<FullAtom> ( AtomType::kMP4A ); } );
+        //RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<MP4AExtensionAtom> ( AtomType::kMP4A ); } );
         
     }
 
