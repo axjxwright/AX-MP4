@@ -10,6 +10,9 @@ get_filename_component( CINDER_PATH "${APP_PATH}/../../../../" ABSOLUTE )
 if ( WIN32 )
 	set(CMAKE_CXX_STANDARD 20)
 	add_compile_options(/W4 /nologo)
+
+	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 endif()
 
 include("${CINDER_PATH}/proj/cmake/modules/cinderMakeApp.cmake")

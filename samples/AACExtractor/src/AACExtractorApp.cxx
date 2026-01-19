@@ -281,7 +281,10 @@ void AACDecoderApp::draw ( )
 
 void AACDecoderApp::cleanup ( )
 {
-    
+	audio::master()->disconnectAllNodes();
+
+    _player = nullptr;
+	_fft = nullptr;
 }
 
 void Init ( App::Settings* settings )
