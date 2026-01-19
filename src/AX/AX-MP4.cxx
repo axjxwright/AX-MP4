@@ -49,16 +49,38 @@ namespace AX
         return ss.str ( );
     }
 
+    u64 ReadContainerAtomHeader ( const IStreamRef& stream, u32& length, u32& type, u64& actualLength )
+    {
+        stream->readBig<u32> ( &length );
+        assert ( length != 0 );
+
+        stream->readBig<u32> ( &type );
+
+        u64 streamPos = stream->tell ( );
+
+        if ( length == 1 )
+        {
+            u64 length64{ 0 };
+            stream->readBig<u64> ( &length64 );
+            actualLength = length64 - 16;
+        } else
+        {
+            actualLength = length - 8;
+        }
+
+        return streamPos;
+    }
+
     AtomRef BaseContainerAtom::FindFirstChild ( AtomType type, bool recursive ) const
     {
-        for ( auto& child : _children )
+        for ( auto& child : GetChildren() )
         {
             if ( child->Type ( ) == type ) return child;
         }
 
         if ( recursive )
         {
-            for ( auto& child : _children )
+            for ( auto& child : GetChildren() )
             {
                 if ( child->IsContainer ( ) )
                 {
@@ -76,7 +98,7 @@ namespace AX
     AtomList BaseContainerAtom::FindChildren ( AtomType type, bool recursive ) const
     {
         std::vector<AtomRef> children;
-        for ( auto& child : _children )
+        for ( auto& child : GetChildren() )
         {
             if ( child->Type ( ) == type )
             {
@@ -86,7 +108,7 @@ namespace AX
 
         if ( recursive )
         {
-            for ( auto& child : _children )
+            for ( auto& child : GetChildren() )
             {
                 if ( child->IsContainer ( ) )
                 {
@@ -112,26 +134,11 @@ namespace AX
         bool done = false;
         while ( !done )
         {  
-            u32 length32{};
-            stream->readBig<u32> ( &length32 );
-            assert ( length32 != 0 );
-
+            u32 length{ 0 };
             AtomType type{ AtomType::kUNKN };
-            stream->readBig<u32> ( (u32 *)&type );
-
-            u64 streamPos = stream->tell ( );
             u64 actualLength{ 0 };
 
-            if ( length32 == 1 )
-            {
-                u64 length{ 0 };
-                stream->readBig<u64> ( &length );
-                actualLength = length - 16;
-            }
-            else
-            {
-                actualLength = length32 - 8;
-            }
+            u64 streamPos = ReadContainerAtomHeader ( stream, length, (u32&)type, actualLength );
 
             if ( auto atom = context.CreateAtom ( type ) )
             {
@@ -521,32 +528,32 @@ namespace AX
     void STSDAtom::Parse ( MP4& context, const IStreamRef& stream, usz expectedLength )
     {
         off_t delta{ 0 };
+        u32 entryCount{ 0 };
         {
+            
             StreamAutoAdvancer adv{ stream, delta };
             FullAtom header{};
             header.Parse ( context, stream, 4 );
 
-            u32 entryCount;
             stream->readBig<u32> ( &entryCount );
-            
-            u32 nextLength{ 0 };
-            stream->readBig<u32> ( &nextLength );
-            stream->seekRelative ( -static_cast<off_t>(sizeof ( u32 )) );
             
             for ( u32 i = 0; i < entryCount; i++ )
             {
-                u32 length{};
-                stream->readBig<u32> ( &length );
+                u32 length{ 0 };
+                u32 type{ 0 };
+                u64 actualLength{ 0 };
 
-                u32 entry{ 0 };
-                stream->readBig<u32> ( &entry );
+                u64 streamPos = ReadContainerAtomHeader ( stream, length, type, actualLength );
+                (void)streamPos;
 
-                if ( entry == 'chan' )
+                if ( auto atom = context.CreateAtom ( (AtomType)type ) )
                 {
-                    std::printf ( "channo\\n" );
-                }
+                    _descriptions.push_back ( type );
 
-                _descriptions.push_back ( entry );
+                    atom->SetInfo ( { context.StackDepth ( ), (usz)length, stream->tell ( ) } );
+                    atom->Parse ( context, stream, actualLength );
+                    AddChild ( atom );
+                }
             }
 
             if ( context.Settings ( ).TracksProperties ( ) )
@@ -780,50 +787,149 @@ namespace AX
         return false;
     }
 
-    void ExtensionAtom::Parse ( MP4&, const ci::IStreamRef& stream, usz expectedLength )
+    void SampleEntryAtom::Parse ( MP4&, const ci::IStreamRef& stream, usz )
     {
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
-            stream->seekRelative ( 6 );
+            for ( int i = 0; i < 6; i++ )
+            {
+                stream->readBig<u8> ( &_reserved[i] );
+            }
+            //stream->seekRelative ( 6 );
             stream->readBig<u16> ( &_dataReferenceIndex );
         }
-        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
     }
 
-    void MP4AExtensionAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
+    void VideoSampleEntryAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
     {
         off_t delta{ 0 };
         {
             StreamAutoAdvancer adv{ stream, delta };
-            ExtensionAtom::Parse ( context, stream, 8 );
+            SampleEntryAtom::Parse ( context, stream, 8 );
 
-            off_t delta2{ 0 };
-            {
-                StreamAutoAdvancer adv2{ stream, delta2 };
-                u32 reserved2[2];
-                u16 reserved3;
-                u16 reserved4;
-                u32 reserved5;
-                u16 timeScale;
-                u16 reserved6;
-                
-                stream->readData ( &reserved2, 2 * sizeof ( u32 ) );
-                stream->readBig ( &reserved3 );
-                stream->readBig ( &reserved4 );
-                stream->readBig ( &reserved5 );
-                stream->readBig ( &timeScale );
-                stream->readBig ( &reserved6 );
+            stream->seekRelative ( 16 );
 
-                // @FIXME(andrew): Need to work out when this is required
-                // Something to do with QT specific data
-                stream->seekRelative ( 4 * sizeof ( u32 ) );
-            }
-
-            ContainerAtom::Parse ( context, stream, expectedLength - delta2 - 8 );
+            stream->readBig<u16> ( &_width );
+            stream->readBig<u16> ( &_height );
+            stream->readBig<u32> ( &_horzResolution );
+            stream->readBig<u32> ( &_vertResolution );
+            stream->readFixedString ( &_compressor, 32 );
+            stream->readBig<u16> ( &_depth );
+            
+            // @TODO(andrew): Parse children (ESDS?)
         }
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
     }
+
+    void AudioSampleEntryAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz )
+    {
+        off_t delta{ 0 };
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            SampleEntryAtom::Parse ( context, stream, 8 );
+
+            stream->seekRelative ( 8 );
+
+            stream->readBig<u16> ( &_channelCount );
+            stream->readBig<u16> ( &_bitsPerSample );
+
+            stream->seekRelative ( 4 );
+
+            stream->readBig<u32> ( &_sampleRate );
+            _sampleRate /= 65536;
+        }
+    }
+
+    void MP4ASampleEntryAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
+    {
+        off_t delta;
+        {
+            StreamAutoAdvancer adv{ stream, delta };
+            AudioSampleEntryAtom::Parse ( context, stream, expectedLength );
+        }
+        
+        off_t delta2;
+        {
+            // @FIXME(andrew): This is pretty disgusting. Scan forward for a bit looking for an 'esds' atom
+            // In a lot of cases it immediately follows this atom, but occasionally there's some optional
+            // atoms in the way (namely 'wave', 'chan' etc). Blow past them until you find an 'esds' or rewind and bail.
+            auto undoPosition = stream->tell ( );
+            bool found = false;
+            {
+                StreamAutoAdvancer adv{ stream, delta2 };
+
+                for ( int i = 0; i < expectedLength - delta - 4; i++ )
+                {
+                    u32 length{ 0 };
+                    u32 type{ 0 };
+
+                    stream->readBig<u32> ( &length );
+                    stream->readBig<u32> ( &type );
+
+                    stream->seekRelative ( -7 );
+
+                    if ( type == (u32)AtomType::kESDS )
+                    {
+                        stream->seekRelative ( -1 );
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if ( found )
+            {
+                // @FIXME(andrew): Not sure about this delta calculation either.
+                ContainerAtom::Parse ( context, stream, expectedLength - delta - delta2 );
+            } else
+            {
+                stream->seekAbsolute ( undoPosition );
+            }
+        }
+
+        stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+    }
+
+    struct BitReader
+    {
+        std::vector<u8>& Data;
+        u32              ByteCursor{ 0 };
+        u32              BitOffset{ 0 };
+
+        BitReader ( std::vector<u8>& data ) : Data ( data ) {};
+
+        u32 ReadBits ( u8 bits ) 
+        {
+            if ( bits <= 0 || bits > sizeof(u32) * 4 ) return 0;
+
+            u32 result = 0;
+            for ( u32 i = 0; i < bits; ++i ) 
+            {
+                if ( BitOffset >= 8 ) 
+                {
+                    ByteCursor++;
+                    BitOffset = 0;
+                    if ( ByteCursor >= Data.size ( ) ) 
+                    {
+                        return 0;
+                    }
+                }
+
+                uint8_t byte = Data[ByteCursor];
+                uint8_t bit = ( byte >> ( 7 - BitOffset ) ) & 1;
+                result = ( result << 1 ) | bit;
+
+                BitOffset++;
+            }
+            return result;
+        }
+    };
+
+    // @NOTE(andrew): Tags
+    // 0x02 - video descriptor
+    // 0x03 - audio descriptor
+    // search "Elementary stream descriptor list" for the rest
 
     void ESDSAtom::Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength )
     {
@@ -832,10 +938,47 @@ namespace AX
             StreamAutoAdvancer adv{ stream, delta };
             FullAtom::Parse ( context, stream, 4 );
 
-            u8 objectType{ 0 };
-            stream->readBig<u8> ( &objectType );
+            {
+                u8 tag{ 0 };
+                u8 length{ 0 };
+                std::vector<u8> descriptor;
+                auto ReadDescriptor = [&]
+                {
+                    stream->readBig<u8> ( &tag );
+                    stream->readBig<u8> ( &length );
 
-            // @TODO(andrew): Read the Elementary Stream Descriptor table
+                    if ( tag == 0 || length == 0 ) return false;
+                    
+                    descriptor.resize ( length );
+                    stream->readData ( descriptor.data ( ), descriptor.size ( ) );
+
+                    return true;
+                };
+                
+                while ( ReadDescriptor ( ) ) 
+                {
+                    if ( tag == 0x03 ) // Audio Descriptor
+                    {   
+                        if ( length >= 1 ) 
+                        {
+                            BitReader reader{ descriptor };
+                            u32 audioObjectType = reader.ReadBits ( 5 );
+                            u32 sampleFreqIndex = reader.ReadBits ( 4 );
+                            u32 channelConfig = reader.ReadBits ( 4 );
+
+                            if ( context.Settings ( ).TracksProperties ( ) )
+                            {
+                                WriteProperty ( "audio_object_type", audioObjectType );
+                                WriteProperty ( "sample_freq_index", sampleFreqIndex );
+                                WriteProperty ( "channel_config", channelConfig );
+                            }
+                            
+                        }
+                    }
+
+                    if ( tag == 0xFF || length == 0 ) break;
+                }
+            }
 
             if ( context.Settings ( ).TracksProperties ( ) )
             {
@@ -908,7 +1051,6 @@ namespace AX
         RegisterAtomFactory ( AtomType::kMETA, [=] { return std::make_shared<FullAtom> ( AtomType::kMETA ); } );
         RegisterAtomFactory ( AtomType::kHDLR, [=] { return std::make_shared<HDLRAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kMDHD, [=] { return std::make_shared<MDHDAtom> ( ); } );
-        RegisterAtomFactory ( AtomType::kESDS, [=] { return std::make_shared<ESDSAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kPITM, [=] { return std::make_shared<FullAtom> ( AtomType::kPITM ); } );
         RegisterAtomFactory ( AtomType::kIINF, [=] { return std::make_shared<FullAtom> ( AtomType::kIINF ); } );
         RegisterAtomFactory ( AtomType::kDREF, [=] { return std::make_shared<FullAtom> ( AtomType::kDREF ); } );
@@ -938,8 +1080,10 @@ namespace AX
         RegisterAtomFactory ( AtomType::kSCHM, [=] { return std::make_shared<FullAtom> ( AtomType::kSCHM ); } );
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
         RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kAVC1 ); } );
-        //RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<FullAtom> ( AtomType::kMP4A ); } );
-        //RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<MP4AExtensionAtom> ( AtomType::kMP4A ); } );
+        RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<MP4ASampleEntryAtom> ( AtomType::kMP4A ); } );
+
+        // @FIXME(andrew): Heaps more work to do on parsing ESDS Descriptors
+        //RegisterAtomFactory ( AtomType::kESDS, [=] { return std::make_shared<ESDSAtom> ( ); } );
         
     }
 
@@ -1201,9 +1345,16 @@ namespace AX
     AudioTrack::AudioTrack ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
         : Track ( mdat, trak )
     {
-        if ( auto mdhd = _mdhd.lock ( ) )
+        if ( auto sampleEntry = trak->FindFirstChildOfType<AudioSampleEntryAtom> ( ) )
         {
-            _sampleRate = mdhd->TimeScale ( );
+            _sampleRate = sampleEntry->SampleRate ( );
+            _channelCount = sampleEntry->ChannelCount ( );
+        } else
+        {
+            if ( auto mdhd = _mdhd.lock ( ) )
+            {
+                _sampleRate = mdhd->TimeScale ( );
+            }
         }
     }
 

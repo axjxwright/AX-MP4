@@ -311,6 +311,7 @@ namespace AX
         virtual bool        IsContainer ( ) const { return false; }
         virtual bool        IsFull      ( ) const { return false; }
         const AtomInfo&     Info        ( ) const { return _info; }
+        void                SetInfo     ( const AtomInfo& info ) { _info = info; }
         const PropertyMap&  Properties  ( ) const { return _properties; }
         virtual std::string ToString    ( ) const;
 
@@ -328,7 +329,6 @@ namespace AX
 
     protected:
 
-        void        SetInfo ( const AtomInfo& info ) { _info = info; }
         
         AtomInfo    _info{ 0 };
         PropertyMap _properties{};
@@ -346,6 +346,32 @@ namespace AX
         virtual AtomList        FindChildren ( AtomType type, bool recursive = true ) const = 0;
         virtual void            AddChild ( const AtomRef& atom ) = 0;
         virtual const AtomList& GetChildren ( ) const = 0;
+
+        template <typename T>
+        std::shared_ptr<T> FindFirstChildOfType ( bool recursive = true ) const
+        {
+            for ( auto& child : GetChildren ( ) )
+            {
+                if ( auto type = child->TryCast<T> ( ) ) return type;
+            }
+
+            if ( recursive )
+            {
+                for ( auto& child : GetChildren ( ) )
+                {
+                    if ( child->IsContainer ( ) )
+                    {
+                        if ( auto result = child->TryCast<IContainerAtom> ( )->FindFirstChildOfType<T> ( recursive ) )
+                        {
+                            return result;
+                        }
+                    }
+                }
+            }
+
+            return nullptr;
+        }
+
         virtual ~IContainerAtom ( ) {};
     };
 
@@ -386,6 +412,7 @@ namespace AX
 
             return cast;
         }
+
 
     protected:
         AtomList    _children;
@@ -719,24 +746,64 @@ namespace AX
         std::vector<Chunk>  _chunks;
     };
 
-    using ExtensionAtomRef = std::shared_ptr<class ExtensionAtom>;
-    class ExtensionAtom : public ContainerAtom
+    using SampleEntryAtomRef = std::shared_ptr<class SampleEntryAtom>;
+    class SampleEntryAtom : public ContainerAtom
     {
     public:
-        ExtensionAtom   ( AtomType type ) : ContainerAtom ( type ) {};
+        SampleEntryAtom ( AtomType type ) : ContainerAtom ( type ) {};
         void            Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
 
     protected:
-        u16         _dataReferenceIndex{ 0 };
-        u8          _reserved[6]{};
+        u16             _dataReferenceIndex{ 0 };
+        u8              _reserved[6]{};
     };
 
-    using MP4AExtensionAtomRef = std::shared_ptr<class MP4AExtensionAtom>;
-    class MP4AExtensionAtom : public ExtensionAtom
+    using VideoSampleEntryAtomRef = std::shared_ptr<class VideoSampleEntryAtom>;
+    class VideoSampleEntryAtom : public SampleEntryAtom
     {
     public:
-        using ExtensionAtom::ExtensionAtom;
-        AtomType    Type ( ) const override { return AtomType::kMP4A; }
+        using SampleEntryAtom::SampleEntryAtom;
+
+        void        Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
+
+        u16         Width           ( ) const { return _width; }
+        u16         Height          ( ) const { return _height; }
+        u32         HorzResolution  ( ) const { return _horzResolution; }
+        u32         VertResolution  ( ) const { return _vertResolution; }
+        std::string Compressor      ( ) const { return _compressor; }
+        u16         Depth           ( ) const { return _depth; }
+
+    protected:
+        u16         _width{ 0 };
+        u16         _height{ 0 };
+        u32         _horzResolution{ 0 };
+        u32         _vertResolution{ 0 };
+        std::string _compressor{};
+        u16         _depth{ 0 };
+    };
+
+    using AudioSampleEntryAtomRef = std::shared_ptr<class AudioSampleEntryAtom>;
+    class AudioSampleEntryAtom : public SampleEntryAtom
+    {
+    public:
+        using       SampleEntryAtom::SampleEntryAtom;
+        void        Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
+
+        u16         ChannelCount  ( ) const { return _channelCount; }
+        u16         BitsPerSample ( ) const { return _bitsPerSample; }
+        u32         SampleRate    ( ) const { return _sampleRate; }
+
+    protected:
+        u16         _channelCount{ 0 };
+        u16         _bitsPerSample{ 0 };
+        u32         _sampleRate{ 0 };
+    };
+
+    using MP4ASampleEntryAtomRef = std::shared_ptr<class MP4ASampleEntryAtom>;
+    class MP4ASampleEntryAtom : public AudioSampleEntryAtom
+    {
+    public:
+        using       AudioSampleEntryAtom::AudioSampleEntryAtom;
         void        Parse ( MP4& context, const ci::IStreamRef& stream, usz expectedLength ) override;
     };
 
