@@ -61,6 +61,20 @@ void AACDecoderApp::setup ( )
 
 bool AACDecoderApp::LoadMP4 ( const DataSourceRef& source )
 {
+    if ( _player )
+    {
+        _player->disconnectAll ( );
+        _player = nullptr;
+    }
+
+    if ( _fft )
+    {
+        _fft->disconnectAll ( );
+        _fft = nullptr;
+    }
+
+    audio::master ( )->disconnectAllNodes ( );
+
     try
     {
         _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties(true).PreloadIntoMemory(true) );
