@@ -255,7 +255,7 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
+        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
         if ( _mp4 )
         {
             if ( _mp4->IsValid ( ) )
@@ -446,8 +446,13 @@ void SimpleHAPDecoderApp::draw ( )
             }
 
             avg /= static_cast<float> ( _decodeTimeHistory.size ( ) );
+
+            static float kHighWatermark = 0.5f;
+            kHighWatermark = std::max ( kHighWatermark, avg );
+            kHighWatermark *= 0.99f;
+
             ui::Text ( "Average Decode Time: %.4fms", avg );
-            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2 ( 0, 32 ) );
+            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
         if ( !_fpsHistory.empty ( ) )

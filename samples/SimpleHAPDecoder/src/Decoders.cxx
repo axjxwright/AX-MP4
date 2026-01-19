@@ -69,8 +69,6 @@ bool HAPDecoder::Decode ( const AX::Sample& sample )
         return length;
     };
 
-    unsigned long uncompressedLength = ( ( sample.Width() + 3 ) / 4 ) * ( ( sample.Height() + 3 ) / 4 ) * 8;
-    
     auto* sampleData = sample.Data ( );
     auto sampleDataLength = sample.Length ( );
 
@@ -87,8 +85,7 @@ bool HAPDecoder::Decode ( const AX::Sample& sample )
     
     unsigned int chunks[2] = {};
     unsigned int formats[2] = {};
-    unsigned long bufferSizes[2] = { uncompressedLength, uncompressedLength };
-
+    
     for ( uint32_t i = 0; i < textureCount; i++ )
     {
         // @NOTE(andrew): Inconsistent HAP api here :/
