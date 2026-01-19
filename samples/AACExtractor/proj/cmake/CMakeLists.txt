@@ -38,6 +38,3 @@ if ( WIN32 )
 		endif()
 	endif()
 endif()
-
-#target_include_directories(${PROJECT_NAME} PUBLIC "C:\\Dev\\SDKs\\soloud\\include")
-#target_link_libraries(${PROJECT_NAME} "C:\\Dev\\SDKs\\soloud\\build\\vs2026\\x64\\Debug\\soloud_static.lib")
