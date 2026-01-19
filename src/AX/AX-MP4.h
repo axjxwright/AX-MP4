@@ -265,8 +265,32 @@ namespace AX
 
     class MP4;
 
+    using CastableRef = std::shared_ptr<class Castable>;
+    class Castable : public std::enable_shared_from_this<Castable>
+    {
+    public:
+
+        virtual ~Castable ( ) {};
+
+        template <typename T>
+        std::shared_ptr<const T> As ( ) const { return std::static_pointer_cast<T> ( shared_from_this ( ) ); }
+
+        template <typename T>
+        std::shared_ptr<T> As ( ) { return std::static_pointer_cast<T> ( shared_from_this ( ) ); }
+
+        template <typename T>
+        std::shared_ptr<const T> TryCast ( ) const { return std::dynamic_pointer_cast<T> ( shared_from_this ( ) ); }
+
+        template <typename T>
+        std::shared_ptr<T> TryCast ( ) { return std::dynamic_pointer_cast<T> ( shared_from_this ( ) ); }
+
+        template <typename T>
+        bool Is ( ) const { return TryCast<T> ( ) != nullptr; }
+
+    };
+
     using AtomRef   = std::shared_ptr<class Atom>;
-    class Atom      : public std::enable_shared_from_this<Atom>
+    class Atom      : public Castable
     {
     public:
         // @FIXME(andrew): Bit gross
@@ -289,21 +313,6 @@ namespace AX
         const AtomInfo&     Info        ( ) const { return _info; }
         const PropertyMap&  Properties  ( ) const { return _properties; }
         virtual std::string ToString    ( ) const;
-
-        template <typename T>
-        std::shared_ptr<const T> As ( ) const { return std::static_pointer_cast<T> ( shared_from_this ( ) ); }
-
-        template <typename T>
-        std::shared_ptr<T> As ( ) { return std::static_pointer_cast<T> ( shared_from_this ( ) ); }
-
-        template <typename T>
-        std::shared_ptr<const T> TryCast ( ) const { return std::dynamic_pointer_cast<T> ( shared_from_this ( ) ); }
-
-        template <typename T>
-        std::shared_ptr<T> TryCast ( ) { return std::dynamic_pointer_cast<T> ( shared_from_this ( ) ); }
-
-        template <typename T>
-        bool Is ( ) const { return TryCast<T> ( ) != nullptr; }
 
         template <typename T>
         void WriteProperty ( const std::string& name, const T& value )
@@ -863,7 +872,7 @@ namespace AX
     /// 
     
     using ITrackDecoderRef = std::shared_ptr<class ITrackDecoder>;
-    class ITrackDecoder : public std::enable_shared_from_this<ITrackDecoder>
+    class ITrackDecoder : public Castable
     {
     public:
         friend class Track;
@@ -908,11 +917,11 @@ namespace AX
     };
    
     using TrackRef          = std::shared_ptr<class Track>;
-    class Track             : public std::enable_shared_from_this<Track>
+    class Track             : public Castable
     {
     public:
-        using AsyncReadCallback = std::function<void ( u32, bool, const Sample&& )>;
-        using AsyncDecodeCallback = std::function<void ( u32, bool, const ITrackDecoderRef& )>;
+        using               AsyncReadCallback = std::function<void ( u32, bool, const Sample&& )>;
+        using               AsyncDecodeCallback = std::function<void ( u32, bool, const ITrackDecoderRef& )>;
         
         Track               ( const MDATAtomRef& mdat, const ContainerAtomRef& trak );
         
@@ -976,8 +985,23 @@ namespace AX
         DecoderFactoryMap       _decoders;
     };
 
+    using AudioTrackRef = std::shared_ptr<class AudioTrack>;
+    class AudioTrack : public Track
+    {
+    public:
+        AudioTrack  ( const MDATAtomRef& mdat, const ContainerAtomRef& trak );
+
+        u32         SampleRate ( ) const { return _sampleRate; }
+        u32         ChannelCount ( ) const { return _channelCount; }
+
+    protected:
+
+        u32         _sampleRate{ 0 };
+        u32         _channelCount{ 0 };
+    };
+
     using MovieRef = std::shared_ptr<class Movie>;
-    class Movie : public std::enable_shared_from_this<Movie>
+    class Movie : public Castable
     {
     public:
         static MovieRef                 Create     ( const MP4Ref& mp4 );

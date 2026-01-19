@@ -541,6 +541,11 @@ namespace AX
                 u32 entry{ 0 };
                 stream->readBig<u32> ( &entry );
 
+                if ( entry == 'chan' )
+                {
+                    std::printf ( "channo\\n" );
+                }
+
                 _descriptions.push_back ( entry );
             }
 
@@ -1056,6 +1061,43 @@ namespace AX
     ///
     /// Convenience Playback API
     /// 
+    
+    static TrackType TrackTypeFromHDLRType ( HDLRSubtype type )
+    {
+        switch ( type )
+        {
+            case HDLRSubtype::kSOUN:
+            {
+                return TrackType::kAudio;
+            }
+
+            case HDLRSubtype::kVIDE:
+            {
+                return TrackType::kVideo;
+            }
+
+            case HDLRSubtype::kHINT:
+            {
+                return TrackType::kHint;
+            }
+            case HDLRSubtype::kJPEG:
+            {
+                return TrackType::kJPEG;
+            }
+
+            case HDLRSubtype::kTX3G:
+            case HDLRSubtype::kSUBT:
+            case HDLRSubtype::kSBTL:
+            {
+                return TrackType::kSubtitles;
+            }
+
+            default:
+            {
+                return TrackType::kUnknown;
+            }
+        }
+    }
 
     MovieRef Movie::Create ( const MP4Ref& mp4 )
     {
@@ -1071,7 +1113,22 @@ namespace AX
             for ( auto& trak : _mp4->FindChildrenAs<ContainerAtom> ( AtomType::kTRAK, true ) )
             {
                 assert ( trak->Type ( ) == AtomType::kTRAK );
-                _tracks.push_back ( std::make_shared<Track> ( mdat, trak ) );
+                if ( auto hdlr = trak->FindFirstChildAs<HDLRAtom> ( AtomType::kHDLR ) )
+                {
+                    auto type = TrackTypeFromHDLRType ( hdlr->Subtype ( ) );
+                    switch ( type )
+                    {
+                        case TrackType::kAudio:
+                        {
+                            _tracks.push_back ( std::make_shared<AudioTrack> ( mdat, trak ) );
+                            break;
+                        }
+                        default:
+                        {
+                            _tracks.push_back ( std::make_shared<Track> ( mdat, trak ) );
+                        }
+                    }
+                }
             }
         }
     }
@@ -1138,39 +1195,15 @@ namespace AX
     TrackType Track::Type ( ) const
     {
         if ( _hdlr.expired() ) return TrackType::kUnknown;
-        
-        switch ( _hdlr.lock()->Subtype ( ) )
+        return TrackTypeFromHDLRType ( _hdlr.lock ( )->Subtype ( ) );
+    }
+
+    AudioTrack::AudioTrack ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
+        : Track ( mdat, trak )
+    {
+        if ( auto mdhd = _mdhd.lock ( ) )
         {
-            case HDLRSubtype::kSOUN:
-            {
-                return TrackType::kAudio;
-            }
-
-            case HDLRSubtype::kVIDE:
-            {
-                return TrackType::kVideo;
-            }
-
-            case HDLRSubtype::kHINT:
-            {
-                return TrackType::kHint;
-            }
-            case HDLRSubtype::kJPEG:
-            {
-                return TrackType::kJPEG;
-            }
-            
-            case HDLRSubtype::kTX3G: 
-            case HDLRSubtype::kSUBT:
-            case HDLRSubtype::kSBTL:
-            {
-                return TrackType::kSubtitles;
-            }
-
-            default:
-            {
-                return TrackType::kUnknown;
-            }
+            _sampleRate = mdhd->TimeScale ( );
         }
     }
 
