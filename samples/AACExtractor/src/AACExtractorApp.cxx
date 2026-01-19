@@ -8,17 +8,11 @@
 
 #include <AX/AX-MP4.h>
 
-#include <windows.h>
-#include <iostream>
-
-
 #include "cinder/app/App.h"
 #include "cinder/app/RendererGl.h"
 #include "cinder/gl/gl.h"
 
-#include "cinder/Utilities.h"
 #include "cinder/CinderImGui.h"
-#include "circular/circular.h"
 #include "cinder/audio/audio.h"
 
 namespace ui = ImGui;
