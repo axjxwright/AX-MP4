@@ -121,7 +121,7 @@ struct ADTSHeader
 
 std::vector<uint8_t> GenerateADTSHeader ( AX::u32 sampleRate, AX::u32 channelCount, AX::u32 aacFrameLength ) 
 {
-    std::vector<AX::u32> kSampleRates = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000 };
+    static std::vector<AX::u32> kSampleRates = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000 };
     auto GetSampleRateIndex = [&]( AX::u32 sampleRate )
     {
         auto it = std::find ( kSampleRates.begin ( ), kSampleRates.end ( ), sampleRate );
@@ -231,7 +231,7 @@ void AACDecoderApp::draw ( )
         static auto kRenderer = gl::getString ( GL_RENDERER );
 
         ui::ScopedWindow window{ "Settings" };
-        ui::Text ( "AX MP4 Parser Test | FPS %.2f | %s", getAverageFps ( ), kRenderer.c_str() );
+        ui::Text ( "AX AAC Extraction | FPS %.2f | %s", getAverageFps ( ), kRenderer.c_str() );
 
         if ( _player )
         {
