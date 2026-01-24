@@ -796,7 +796,7 @@ namespace AX
             {
                 stream->readBig<u8> ( &_reserved[i] );
             }
-            //stream->seekRelative ( 6 );
+            
             stream->readBig<u16> ( &_dataReferenceIndex );
         }
     }
@@ -816,6 +816,9 @@ namespace AX
             stream->readBig<u32> ( &_vertResolution );
             stream->readFixedString ( &_compressor, 32 );
             stream->readBig<u16> ( &_depth );
+
+            _horzResolution /= 65536;
+            _vertResolution /= 65536;
             
             // @TODO(andrew): Parse children (ESDS?)
         }
@@ -901,7 +904,7 @@ namespace AX
 
         u32 ReadBits ( u8 bits ) 
         {
-            if ( bits <= 0 || bits > sizeof(u32) * 4 ) return 0;
+            if ( bits <= 0 || bits > 32 ) return 0;
 
             u32 result = 0;
             for ( u32 i = 0; i < bits; ++i ) 
@@ -1025,6 +1028,64 @@ namespace AX
         return nullptr;
     }
 
+    struct METAAtom : public ContainerAtom
+    {
+        AtomType Type ( ) const override { return AtomType::kMETA; }
+        void Parse ( MP4& context, const IStreamRef& stream, u64 expectedSize ) override
+        {
+            FullAtom atom{};
+            atom.Parse ( context, stream, 4 );
+
+            ContainerAtom::Parse ( context, stream, expectedSize );
+        }
+    };
+
+    struct ILSTAtom : public ContainerAtom
+    {
+        AtomType Type ( ) const override { return AtomType::kILST; }
+        void Parse ( MP4& context, const IStreamRef& stream, u64 expectedSize ) override
+        {
+            ContainerAtom::Parse ( context, stream, expectedSize );
+        }
+    };
+
+    struct DATAAtom : public FullAtom
+    {
+        AtomType Type ( ) const override { return AtomType::kDATA; }
+        void Parse ( MP4& context, const IStreamRef& stream, u64 expectedLength ) override
+        {
+            off_t delta{ 0 };
+            {
+                StreamAutoAdvancer adv{ stream, delta };
+                
+                u32 type{ 0 };
+                stream->readBig<u32> ( &type );
+
+                u32 locale{ 0 };
+                stream->readBig<u32> ( &locale );
+
+                std::string t = FourCCToString ( type );
+                std::string l = FourCCToString ( locale );
+
+                std::string data;
+                u64 charsRemaining = ( expectedLength - 2 * sizeof ( u32 ) );
+                while ( charsRemaining-- )
+                {
+                    u8 byte{ 0 };
+                    stream->read<u8> ( &byte );
+                    if ( byte == 0 ) break;
+                    data.append ( 1, byte );
+                }
+
+                if ( context.Settings ( ).TracksProperties ( ) )
+                {
+                    WriteProperty ( "data", data );
+                }
+            }
+            stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
+        }
+    };
+
     MP4::MP4 ( const DataSourceRef& source, const Format& format )
         : _format ( format )
         , _source ( source )
@@ -1036,7 +1097,7 @@ namespace AX
             AtomType::kTRAF, AtomType::kMFRA, AtomType::kMECO, AtomType::kMERE,
             AtomType::kDINF, AtomType::kIPRO, AtomType::kSINF, AtomType::kIPRP,
             AtomType::kFIIN, AtomType::kPAEN, AtomType::kSTRK, AtomType::kTAPT,
-            AtomType::kSCHI
+            AtomType::kSCHI, AtomType::kUDTA, AtomType::k_TOO, AtomType::k_SWR
         };
 
         for ( auto& container : containers )
@@ -1048,7 +1109,6 @@ namespace AX
         RegisterAtomFactory ( AtomType::kMDAT, [=] { return std::make_shared<MDATAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kMVHD, [=] { return std::make_shared<MVHDAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kTKHD, [=] { return std::make_shared<TKHDAtom> ( ); } );
-        RegisterAtomFactory ( AtomType::kMETA, [=] { return std::make_shared<FullAtom> ( AtomType::kMETA ); } );
         RegisterAtomFactory ( AtomType::kHDLR, [=] { return std::make_shared<HDLRAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kMDHD, [=] { return std::make_shared<MDHDAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kPITM, [=] { return std::make_shared<FullAtom> ( AtomType::kPITM ); } );
@@ -1079,9 +1139,14 @@ namespace AX
         RegisterAtomFactory ( AtomType::kFRMA, [=] { return std::make_shared<UnknownAtom> ( AtomType::kFRMA ); } );
         RegisterAtomFactory ( AtomType::kSCHM, [=] { return std::make_shared<FullAtom> ( AtomType::kSCHM ); } );
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
-        RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kAVC1 ); } );
         RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<MP4ASampleEntryAtom> ( AtomType::kMP4A ); } );
-
+        RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kAVC1 ); } );
+        
+        // @Note(andrew): Early development but seem to be working
+        RegisterAtomFactory ( AtomType::kMETA, [=] { return std::make_shared<METAAtom> ( ); } );
+        RegisterAtomFactory ( AtomType::kILST, [=] { return std::make_shared<ILSTAtom> ( ); } );
+        RegisterAtomFactory ( AtomType::kDATA, [=] { return std::make_shared<DATAAtom> ( ); } );
+        
         // @FIXME(andrew): Heaps more work to do on parsing ESDS Descriptors
         //RegisterAtomFactory ( AtomType::kESDS, [=] { return std::make_shared<ESDSAtom> ( ); } );
         

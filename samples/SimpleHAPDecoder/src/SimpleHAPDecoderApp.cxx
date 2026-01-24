@@ -444,13 +444,12 @@ void SimpleHAPDecoderApp::draw ( )
                 avg += ms;
                 samples.push_back ( ms );
             }
-
+            
             avg /= static_cast<float> ( _decodeTimeHistory.size ( ) );
 
             static float kHighWatermark = 0.5f;
             kHighWatermark = std::max ( kHighWatermark, avg );
-            kHighWatermark *= 0.99f;
-
+            
             ui::Text ( "Average Decode Time: %.4fms", avg );
             ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
@@ -465,8 +464,12 @@ void SimpleHAPDecoderApp::draw ( )
                 samples.push_back ( sample );
             }
 
+            static float kHighWatermark = getFrameRate();
+            kHighWatermark = std::max ( kHighWatermark, getAverageFps() );
+            kHighWatermark = lerp ( kHighWatermark, getAverageFps(), 0.0001f );
+            
             ui::Text ( "FPS History" );
-            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, getFrameRate(), ImVec2 ( 0, 32 ) );
+            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
         if ( _mp4 ) Inspect ( _mp4.get ( ) );

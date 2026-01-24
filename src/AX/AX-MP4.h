@@ -210,6 +210,10 @@ namespace AX
         kIPMA = AX_FOURCC ( 'i', 'p', 'm', 'a' ),
         kPIXI = AX_FOURCC ( 'p', 'i', 'x', 'i' ),
         kIPCO = AX_FOURCC ( 'i', 'p', 'c', 'o' ),
+
+        kDATA = AX_FOURCC ( 'd', 'a', 't', 'a' ),
+        k_TOO = AX_FOURCC ( '©', 't', 'o', 'o' ), //'©too';
+        k_SWR = AX_FOURCC ( '©', 's', 'w', 'r' ), //'©swr';
     };
 
     enum class HDLRType : u32
