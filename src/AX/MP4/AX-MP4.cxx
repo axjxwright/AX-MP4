@@ -1299,7 +1299,6 @@ namespace AX::Media::MP4
 	MP4Movie::MP4Movie ( const ContainerRef & container )
 		: Movie ( container )
     {
-		//_mp4 = _container->TryCast<MP4> ( );
 		auto * mp4 = dynamic_cast<MP4 *>( _container.get ( ) );
         if ( mp4 )
         {
@@ -1310,23 +1309,13 @@ namespace AX::Media::MP4
                 if ( auto hdlr = trak->FindFirstChildAs<HDLRAtom> ( AtomType::kHDLR ) )
                 {
                     auto type = TrackTypeFromHDLRType ( hdlr->Subtype ( ) );
-                    switch ( type )
-                    {
-                        case TrackType::kAudio:
-                        {
-                            _tracks.push_back ( std::make_shared<MP4AudioTrack> ( mdat, trak ) );
-                            break;
-                        }
-                        default:
-                        {
-                            _tracks.push_back ( std::make_shared<MP4Track> ( mdat, trak ) );
-                        }
-                    }
+					(void)type;
+
+					_tracks.push_back ( std::make_shared<MP4Track> ( mdat, trak ) );
                 }
             }
         }
     }
-
 
 	MP4Track::MP4Track ( const MDATAtomRef & mdat, const ContainerAtomRef & trak )
 		: Track ( TrackType::kUnknown )
@@ -1360,22 +1349,23 @@ namespace AX::Media::MP4
 		{
 			_durationSeconds = mdhd->DurationSeconds ( );
 		}
-    }
 
-    MP4AudioTrack::MP4AudioTrack ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
-		: MP4Track ( mdat, trak )
-    {
-        if ( auto sampleEntry = trak->FindFirstChildOfType<AudioSampleEntryAtom> ( ) )
-        {
-            _sampleRate = sampleEntry->SampleRate ( );
-            _channelCount = sampleEntry->ChannelCount ( );
-        } else
-        {
-            if ( auto mdhd = _mdhd.lock ( ) )
-            {
-                _sampleRate = mdhd->TimeScale ( );
-            }
-        }
+		if ( auto stsd = _stsd.lock ( ) )
+		{
+			stsd->GetSampleDescription ( 1, _codecId );
+		}
+
+		if ( auto sampleEntry = trak->FindFirstChildOfType<AudioSampleEntryAtom> ( ) )
+		{
+			_sampleRate = sampleEntry->SampleRate ( );
+			_channelCount = sampleEntry->ChannelCount ( );
+		} else
+		{
+			if ( auto mdhd = _mdhd.lock ( ) )
+			{
+				_sampleRate = mdhd->TimeScale ( );
+			}
+		}
     }
 
     bool MP4Track::ReadSample ( u32 index, Sample& sample ) const

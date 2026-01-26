@@ -626,30 +626,49 @@ namespace AX::Media::MKV
 			_trackNumber = element->Value<u64> ( );
 		}
 
+		// @todo(andrew): Handle these properly
+		// https://www.matroska.org/technical/codec_specs.html
 		if ( auto element = FindFirstChild ( MatroskaElementId::kCodecID ) )
 		{
 			_codecId = element->Value<std::string> ( );
-			if ( _codecId == "V_MJPEG" )
-			{
-				_handler = 'jpeg';
-			} else if ( _codecId == "V_QUICKTIME" )
-			{
-				if ( auto priv = FindFirstChild ( MatroskaElementId::kCodecPrivate ) )
-				{
-					auto data = priv->Value<std::vector<u8>> ( );
-					std::string_view view{ (char *)data.data ( ), data.size ( ) };
-					auto index = view.find ( "Hap" );
-					if ( index != std::string::npos && index < data.size() - 4 )
-					{
-						std::string hap{ (char *)data.data ( ) + index, 4 };
-						_handler = AX_FOURCC ( hap[0], hap[1], hap[2], hap[3] );
-					}
-				} else
-				{
-					// @todo(andrew): This is not a fair assumption to make
-					// but will have to do for now.
 
-					_handler = 'Hap1';
+			if ( _trackType == TrackType::kVideo )
+			{
+				if ( _codecId == "V_MJPEG" )
+				{
+					_handler = 'jpeg';
+				} else if ( _codecId == "V_QUICKTIME" )
+				{
+					if ( auto priv = FindFirstChild ( MatroskaElementId::kCodecPrivate ) )
+					{
+						// @note(andrew): This buffer is actually an STSD Atom from
+						// the mp4 container format. Skip the fourcc + size bytes
+						// to read the codec id.
+
+						auto data = priv->Value<std::vector<u8>> ( );
+						std::string_view view{ (char *)data.data ( ), data.size ( ) };
+						auto index = view.find ( "Hap" );
+						if ( index != std::string::npos && index < data.size ( ) - 4 )
+						{
+							std::string hap{ (char *)data.data ( ) + index, 4 };
+							_handler = AX_FOURCC ( hap[0], hap[1], hap[2], hap[3] );
+						}
+					} else
+					{
+						// @todo(andrew): This is not a fair assumption to make
+						// but will have to do for now.
+
+						_handler = 'Hap1';
+					}
+				}
+			} else
+			{
+				if ( _codecId == "A_EAC3" )
+				{
+					_handler = 'eac3';
+				} else if ( _codecId.find ( "AAC" ) != std::string::npos )
+				{
+					_handler = 'mp4a';
 				}
 			}
 		}
@@ -825,6 +844,23 @@ namespace AX::Media::MKV
 		_sampleCount = static_cast<u32>(_track->Blocks ( ).size ( ));
 		_durationSeconds = _track->Duration ( );
 		_size = ivec2 ( _track->Width ( ), _track->Height ( ) );
+
+		if ( _type == TrackType::kAudio )
+		{
+			if ( auto element = track->FindFirstChild ( MatroskaElementId::kAudio ) )
+			{
+				auto audio = element->As<MasterElement> ( );
+				if ( auto channels = audio->FindFirstChild ( MatroskaElementId::kChannels ) )
+				{
+					_channelCount = static_cast<u32> ( channels->Value<u64> ( ) );
+				}
+				
+				if ( auto sampling = audio->FindFirstChild ( MatroskaElementId::kSamplingFrequency ) )
+				{
+					_sampleRate = static_cast<u32> ( sampling->Value<double> ( ) );
+				}
+			}
+		}
 	}
 
 	MKVAudioTrack::MKVAudioTrack ( const TrackElementRef & track )

@@ -231,7 +231,7 @@ void SimpleHAPDecoderApp::setup ( )
 
     ui::Initialize ( );
     AX::InitLivePP ( );
-    
+
 	if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
         // Sample HAP videos downloadable from
@@ -253,6 +253,7 @@ const uint32_t kJPEG = 'jpeg';
 
 bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
 {
+	Timer timer{ true };
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
@@ -272,6 +273,8 @@ bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
 					_track->RegisterDecoder<HAPDecoder> ( kHAPM );
 					_track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
 				}
+
+				std::printf ( "Loaded in %.2fms\n", timer.getSeconds ( ) * 1000.0 );
 
 				//_container->Dump ( std::cout, true );
 
@@ -475,7 +478,7 @@ void SimpleHAPDecoderApp::draw ( )
             ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
-		Inspect ( *_container.get ( ) );
+		if ( _container ) Inspect ( *_container.get ( ) );
     }
 
     if ( _YCoCgPlane )

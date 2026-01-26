@@ -833,11 +833,4 @@ namespace AX::Media::MP4
 		Weak<HDLRAtom>          _hdlr{ };
 		Weak<MDHDAtom>          _mdhd{ };
 	};  
-
-	using MP4AudioTrackRef = std::shared_ptr<class MP4AudioTrack>;
-	class MP4AudioTrack : public MP4Track
-	{
-	public:
-		MP4AudioTrack ( const MDATAtomRef & mdat, const ContainerAtomRef & trak );
-	};
 }

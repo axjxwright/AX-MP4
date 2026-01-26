@@ -75,7 +75,6 @@ namespace AX
 			
 			ContainerType		Type ( ) const { return _type; }
 
-			// @note(andrew): -1 to Ignore self
 			virtual u32			StackDepth ( ) const { return 0; }
 			virtual bool        IsValid ( ) const { return _isValid; }
 			virtual ErrorCode	Error ( ) const { return _error; }
@@ -125,12 +124,14 @@ namespace AX
 			const glm::ivec2 &  Size ( ) const { return _size; }
 			const int           Width ( ) const { return _size.x; }
 			const int           Height ( ) const { return _size.y; }
+			u32					CodecId ( ) const { return _codecId; }
 
 			u32					SampleCount ( ) const { return _sampleCount; }
 			float				DurationSeconds ( ) const { return _durationSeconds; }
 
 			u32					SampleRate ( ) const { return _sampleRate; }
 			u32					ChannelCount ( ) const { return _channelCount; }
+
 
 		protected:
 
@@ -156,8 +157,11 @@ namespace AX
 
 			u32						_sampleCount{ 0 };
 			float					_durationSeconds{ 0 };
+
 			u32						_sampleRate{ 0 };
 			u32						_channelCount{ 0 };
+
+			u32						_codecId{ 0 };
 		};
 
 		using MovieRef = std::shared_ptr<class Movie>;
