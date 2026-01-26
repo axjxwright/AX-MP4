@@ -205,10 +205,10 @@ protected:
     void            OnSampleDecoded     ( const AX::Media::ITrackDecoderRef& decoded );
 
     AX::Media::ITrackDecoderRef	_decoded;
-    gl::TextureRef  _frame;
+    gl::TextureRef			_frame;
     
-    gl::TextureRef  _YCoCgPlane;
-    gl::TextureRef  _alphaPlane;
+    gl::TextureRef			_YCoCgPlane;
+    gl::TextureRef			_alphaPlane;
     
     AX::Media::ContainerRef _container;
     AX::Media::MovieRef		_movie;
@@ -231,6 +231,9 @@ void SimpleHAPDecoderApp::setup ( )
 
     ui::Initialize ( );
     AX::InitLivePP ( );
+
+	LoadMedia ( loadFile ( "C:\\Users\\msfts\\Downloads\\Shoresy\\Shoresy.S05E02.The.Great.One.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv" ) );
+	return;
 
 	if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
@@ -257,7 +260,7 @@ bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
-		_container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
+		_container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
         if ( _container )
         {
             if ( _container->IsValid ( ) )

@@ -294,8 +294,15 @@ namespace AX::Media::MKV
 		try
 		{
 			IStreamRef stream = _source->createStream ( );
+			if ( Settings ( ).PreloadsIntoMemory ( ) )
+			{
+				_buffer = _source->getBuffer ( );
+				stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
+			}
+
 			u64 streamSize = stream->size ( );
 			_length = streamSize;
+
 
 			if ( !StartsWithEBML ( stream ) )
 			{
@@ -307,8 +314,9 @@ namespace AX::Media::MKV
 			assert ( _stack.empty ( ) && "MKV Element stack underflow" );
 
 			_isValid = true;
-		} catch ( const std::exception & )
+		}catch ( const std::exception & e )
 		{
+			std::printf ( "Error: %s\n", e.what ( ) );
 			_error = ErrorCode::Unknown;
 		}
 
@@ -318,14 +326,21 @@ namespace AX::Media::MKV
 	ElementRef MKV::ReadNextElement ( const IStreamRef & stream )
 	{
 		usz position = stream->tell ( );
+		u32 toRead = std::min ( 8u, (u32)(stream->size ( ) - position) );
+
+		if ( toRead == 0 ) return nullptr;
+
 		u64 data{};
-		stream->read ( &data );
+		stream->readData ( &data, toRead );
 
 		auto [id, bytesUsed] = ReadElementIDAndWidth ( static_cast<u32>(data) );
 		stream->seekAbsolute ( static_cast<off_t>(position + bytesUsed) );
 
+		toRead = std::min ( 8u, (u32)( stream->size ( ) - stream->tell() ) );
+		if ( toRead == 0 ) return nullptr;
+
 		position = stream->tell ( );
-		stream->read ( &data );
+		stream->readData ( &data, toRead );
 
 		auto [size, bytesUsed2] = ReadElementSize ( data );
 		stream->seekAbsolute ( static_cast<off_t>(position + bytesUsed2) );
@@ -334,7 +349,7 @@ namespace AX::Media::MKV
 
 		if ( identifier.ID == MatroskaElementId::kUnknown )
 		{
-			std::printf ( "missing: 0x%llx (%llu)\n", id, size );
+			std::printf ( "Missing: 0x%llx (%llu)\n", id, size );
 			stream->seekRelative ( static_cast<off_t>(size) );
 			return nullptr;
 		}
@@ -513,7 +528,7 @@ namespace AX::Media::MKV
 		u64 end = pos + length;
 		context.Push ( this );
 
-		while ( pos < end )
+		while ( stream->tell() < end )
 		{
 			if ( auto element = context.ReadNextElement ( stream ) )
 			{
@@ -743,6 +758,10 @@ namespace AX::Media::MKV
 
 	bool SimpleBlockElement::Parse ( MKV & context, const IStreamRef & stream, usz length )
 	{
+		// @perf(andrew): All these little reads are killing performance
+		// Perhaps implement a higher level Element type and bulk read
+		// them into a large block of memory and then write SimpleBlockElementViews
+		// over the data. 
 		u64 position = stream->tell ( );
 		u64 data{};
 		stream->read ( &data );
@@ -765,6 +784,7 @@ namespace AX::Media::MKV
 		_positionInStream = stream->tell ( );
 		_lengthInStream = length;
 
+		// @note(andrew): Already in memory
 		if ( auto mem = std::dynamic_pointer_cast<IStreamMem> ( stream ) )
 		{
 			_stream = IStreamMem::create ( (u8 *)mem->getData ( ) + mem->tell ( ), length );

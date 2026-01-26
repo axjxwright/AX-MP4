@@ -218,6 +218,7 @@ namespace AX::Media::MKV
 		using ElementStack = std::stack<Element *>;
 		ElementStack		_stack;
 		FactoryMap			_factories;
+		ci::BufferRef		_buffer;
 	};
 
 	using MKVMovieRef = std::shared_ptr<class MKVMovie>;
