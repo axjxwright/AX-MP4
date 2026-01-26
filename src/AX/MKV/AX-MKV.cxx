@@ -243,7 +243,6 @@ namespace AX::Media::MKV
 	static void DumpElement ( const Element * element, std::ostream & stream, bool verbose, int indent = 0 )
 	{
 		stream << AX_INDENT ( indent ) << element->ToString ( );
-#if 0
 		if ( verbose )
 		{
 			u32 ctr{ 0 };
@@ -251,7 +250,7 @@ namespace AX::Media::MKV
 			if ( size > 0 )
 			{
 				stream << " [";
-				for ( auto & [name, value] : atom->Properties ( ) )
+				for ( auto & [name, value] : element->Properties ( ) )
 				{
 					stream << name << "=" << value;
 					if ( ctr++ < size - 1 ) stream << ", ";
@@ -259,7 +258,6 @@ namespace AX::Media::MKV
 				stream << "]";
 			}
 		}
-#endif
 		stream << "\n";
 
 		if ( element->Identifier().Type == MatroskaDataType::kMaster )
