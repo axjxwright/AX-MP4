@@ -12,9 +12,11 @@
 #include "cinder/Timer.h"
 #include "hap.h"
 
+#include <AX/AX-MediaContainer.h>
+
 using namespace ci;
 
-bool MJPEGDecoder::Decode ( const AX::Sample& sample )
+bool MJPEGDecoder::Decode ( const AX::Media::Sample& sample )
 {
     try
     {
@@ -44,17 +46,20 @@ bool MJPEGDecoder::Decode ( const AX::Sample& sample )
     }
 }
 
-gl::TextureRef MJPEGDecoder::CreateTexture ( AX::u32 index, const gl::Texture::Format& fmt ) const
+gl::TextureRef MJPEGDecoder::CreateTexture ( uint32_t index, const gl::Texture::Format& fmt ) const
 {
     assert ( app::isMainThread ( ) && "GL calls must be invoked on the main thread" );
     auto& decoded = FrameAt ( index );
 
-    auto format = fmt;
-    format.label ( AX::FourCCToString ( Handler ( ) ) );
-    return gl::Texture::create ( decoded.PixelBuffer, decoded.GPUFormat, decoded.Width, decoded.Height );
+    auto texture = gl::Texture::create ( decoded.PixelBuffer, decoded.GPUFormat, decoded.Width, decoded.Height );
+	texture->setLabel ( AX::FourCCToString ( Handler ( ) ) );
+	texture->setMinFilter ( fmt.getMinFilter ( ) );
+	texture->setMagFilter ( fmt.getMagFilter ( ) );
+	texture->setWrap ( fmt.getWrapS ( ), fmt.getWrapT ( ), fmt.getWrapR ( ) );
+	return texture;
 }
 
-bool HAPDecoder::Decode ( const AX::Sample& sample )
+bool HAPDecoder::Decode ( const AX::Media::Sample& sample )
 {
     auto EstimateUncompressedLength = [&] ( HapTextureFormat format )
     {
@@ -191,7 +196,7 @@ bool HAPDecoder::Decode ( const AX::Sample& sample )
     return true;
 }
 
-gl::TextureRef HAPDecoder::CreateTexture ( AX::u32 index, const gl::Texture::Format& fmt ) const
+gl::TextureRef HAPDecoder::CreateTexture ( uint32_t index, const gl::Texture::Format& fmt ) const
 {
 	assert ( app::isMainThread ( ) && "GL calls must be invoked on the main thread" );
 
