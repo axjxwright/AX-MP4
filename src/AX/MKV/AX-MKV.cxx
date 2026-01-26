@@ -28,16 +28,12 @@ namespace AX::Media::MKV
 
 		// @fixme(andrew): Proper std::bit_cast polyfill for < c++20
 		template <typename To, typename From>
-		typename std::enable_if<
-			sizeof ( To ) == sizeof ( From ) &&
-			std::is_trivially_copyable<From>::value &&
-			std::is_trivially_copyable<To>::value,
-			To>::type
-			bit_cast ( const From & src ) noexcept
+		typename std::enable_if<sizeof ( To ) == sizeof ( From ) && std::is_trivially_copyable<From>::value && std::is_trivially_copyable<To>::value, To>::type
+		bit_cast ( const From & src ) noexcept
 		{
 			static_assert( std::is_trivially_constructible<To>::value, "Destination type must be trivially constructible in this polyfill implementation" );
 
-			To dst;
+			To dst{};
 			std::memcpy ( &dst, &src, sizeof ( To ) );
 			return dst;
 		}
@@ -60,8 +56,10 @@ namespace AX::Media::MKV
 		{
 			u8 first = data[0];
 			u32 length = 0;
-			for ( u32 i = 0; i < 8; ++i ) {
-				if ( ( first >> ( 7 - i ) ) & 1 ) {
+			for ( u32 i = 0; i < 8; ++i ) 
+			{
+				if ( ( first >> ( 7 - i ) ) & 1 ) 
+				{
 					length = i + 1;
 					break;
 				}
