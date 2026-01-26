@@ -38,7 +38,7 @@ namespace AX::Media::MKV
 			return dst;
 		}
 		
-		u64 Pack ( u64 n, uint8_t * b )
+		static u64 Pack ( u64 n, uint8_t * b )
 		{
 			uint64_t v = 0;
 			uint64_t k = ( (uint64_t)n - 1 ) * 8;
@@ -52,7 +52,7 @@ namespace AX::Media::MKV
 			return v;
 		}
 
-		u64 Unpack ( const uint8_t * data, size_t & bytesRead )
+		static u64 Unpack ( const uint8_t * data, size_t & bytesRead )
 		{
 			u8 first = data[0];
 			u32 length = 0;
@@ -76,7 +76,7 @@ namespace AX::Media::MKV
 			return value;
 		}
 
-		std::string ReadFixedString ( const IStreamRef & stream, usz & length )
+		static std::string ReadFixedString ( const IStreamRef & stream, usz & length )
 		{
 			if ( length == 0 ) return "";
 
@@ -86,7 +86,7 @@ namespace AX::Media::MKV
 			return result;
 		}
 
-		u64 ReadUint ( const IStreamRef & stream, usz & length )
+		static u64 ReadUint ( const IStreamRef & stream, usz & length )
 		{
 			if ( length == 0 ) return 0;
 
@@ -102,7 +102,7 @@ namespace AX::Media::MKV
 			return value;
 		}
 
-		s64 ReadInt ( const IStreamRef & stream, usz & length )
+		static s64 ReadInt ( const IStreamRef & stream, usz & length )
 		{
 			if ( length == 0 ) return 0;
 			s64 value = 0;
@@ -117,7 +117,7 @@ namespace AX::Media::MKV
 			return value;
 		}
 
-		double ReadFloat ( const IStreamRef & stream, usz & length )
+		static double ReadFloat ( const IStreamRef & stream, usz & length )
 		{
 			assert ( length == 4 || length == 8 );
 
@@ -148,7 +148,7 @@ namespace AX::Media::MKV
 			}
 		}
 
-		std::pair<usz, u32> ReadElementIDAndWidth ( u32 block )
+		static std::pair<usz, u32> ReadElementIDAndWidth ( u32 block )
 		{
 			u8 * buffer = reinterpret_cast<u8 *>( &block );
 			uint8_t b = buffer[0];
@@ -174,7 +174,7 @@ namespace AX::Media::MKV
 			return { 0, 0 };
 		}
 
-		std::pair<u64, u64> ReadElementSize ( u64 block )
+		static std::pair<u64, u64> ReadElementSize ( u64 block )
 		{
 			u8 * buffer = reinterpret_cast<u8 *>( &block );
 			uint8_t b = buffer[0];
@@ -420,7 +420,7 @@ namespace AX::Media::MKV
 		return _stack.top ( );
 	}
 
-	bool UnhandledElement::Parse ( MKV &, const IStreamRef& stream, usz length )
+	bool UnhandledElement::Parse ( MKV & context, const IStreamRef& stream, usz length )
 	{
 		std::string value{};
 
@@ -429,28 +429,28 @@ namespace AX::Media::MKV
 			case MatroskaDataType::kString:
 			{
 				_value = ReadFixedString ( stream, length );
-				value = " - String{" + Value<std::string>() + "}";
+				value = "String{" + Value<std::string>() + "}";
 				break;
 			}
 
 			case MatroskaDataType::kFloat:
 			{
 				_value = ReadFloat ( stream, length );
-				value = " - Float{" + std::to_string ( Value<double>() ) + "}";
+				value = "Float{" + std::to_string ( Value<double>() ) + "}";
 				break;
 			}
 
 			case MatroskaDataType::kInteger:
 			{
 				_value = ReadInt ( stream, length );
-				value = " - SINT{" + std::to_string ( Value<s64>() ) + "}";
+				value = "SINT{" + std::to_string ( Value<s64>() ) + "}";
 				break;
 			}
 
 			case MatroskaDataType::kUnsignedInt:
 			{
 				_value = ReadUint ( stream, length );
-				value = " - UINT{" + std::to_string ( Value<u64>() ) + "}";
+				value = "UINT{" + std::to_string ( Value<u64>() ) + "}";
 				break;
 			}
 
@@ -474,21 +474,26 @@ namespace AX::Media::MKV
 				}
 
 				_value = buffer;
-				value = " - Binary{" + ss.str ( ) + "}";
+				value = "Binary{" + ss.str ( ) + "}";
 				break;
 			}
 
 			case MatroskaDataType::kUnicode:
 			{
 				_value = ReadFixedString ( stream, length );
-				value = " - UTF8{" + Value<std::string>() + "}";
+				value = "UTF8{" + Value<std::string>() + "}";
 				break;
 			}
 
 			default:
 			{
-				value = " - TODO{}";
+				value = "TODO{}";
 			}
+		}
+
+		if ( context.Settings ( ).TracksProperties ( ) )
+		{
+			WriteProperty ( "value", value );
 		}
 
 		if ( _identifier.Type != MatroskaDataType::kMaster )
@@ -629,7 +634,23 @@ namespace AX::Media::MKV
 				_handler = 'jpeg';
 			} else if ( _codecId == "V_QUICKTIME" )
 			{
-				_handler = 'Hap1';
+				if ( auto priv = FindFirstChild ( MatroskaElementId::kCodecPrivate ) )
+				{
+					auto data = priv->Value<std::vector<u8>> ( );
+					std::string_view view{ (char *)data.data ( ), data.size ( ) };
+					auto index = view.find ( "Hap" );
+					if ( index != std::string::npos && index < data.size() - 4 )
+					{
+						std::string hap{ (char *)data.data ( ) + index, 4 };
+						_handler = AX_FOURCC ( hap[0], hap[1], hap[2], hap[3] );
+					}
+				} else
+				{
+					// @todo(andrew): This is not a fair assumption to make
+					// but will have to do for now.
+
+					_handler = 'Hap1';
+				}
 			}
 		}
 

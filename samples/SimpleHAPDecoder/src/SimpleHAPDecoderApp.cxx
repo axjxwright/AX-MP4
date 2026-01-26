@@ -204,8 +204,7 @@ protected:
     void            DecodeFrameAtAsync  ( int index );
     void            OnSampleDecoded     ( const AX::Media::ITrackDecoderRef& decoded );
 
-    int                     _currentSample{ 0 };
-    AX::Media::ITrackDecoderRef    _decoded;
+    AX::Media::ITrackDecoderRef	_decoded;
     gl::TextureRef  _frame;
     
     gl::TextureRef  _YCoCgPlane;
@@ -215,7 +214,8 @@ protected:
     AX::Media::MovieRef		_movie;
     AX::Media::TrackRef		_track{ nullptr };
 
-    float					_playRate{ 0.0f };
+    int                     _currentSample{ 0 };
+    float					_playRate{ 1.0f };
     float					_time{ 0 };
     
     bool                    _async{ false };
@@ -232,8 +232,6 @@ void SimpleHAPDecoderApp::setup ( )
     ui::Initialize ( );
     AX::InitLivePP ( );
     
-	//LoadMedia ( loadAsset ( "Videos/hap-mkv.mkv" ) );
-	
 	if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
         // Sample HAP videos downloadable from
@@ -275,7 +273,7 @@ bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
 					_track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
 				}
 
-				_container->Dump ( std::cout, true );
+				//_container->Dump ( std::cout, true );
 
                 _currentSample = 0;
                 _time = 0.0f;
