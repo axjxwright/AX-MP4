@@ -756,7 +756,7 @@ namespace AX::Media::MKV
 			}
 		}
 
-		_duration *= static_cast<float>( blocks.size ( ) );
+		_duration *= static_cast<float>( _blocks.size ( ) );
 		if ( container.Settings ( ).TracksProperties ( ) )
 		{
 			WriteProperty ( "duration", _duration );
