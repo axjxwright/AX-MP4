@@ -1,14 +1,21 @@
 if( NOT TARGET AX-MP4 )
 
+	option( AX_MEDIA_WITH_MKV "Compile with MKV Container support" ON )
+
 	get_filename_component( AXMP4_SOURCE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../src" ABSOLUTE )
 	get_filename_component( CINDER_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE )
 
-	list( APPEND AXMP4_SOURCE_FILES "${AXMP4_SOURCE_PATH}/AX/AX-MP4.h" "${AXMP4_SOURCE_PATH}/AX/AX-MP4.cxx" )
-
+	file ( GLOB_RECURSE AXMP4_SOURCE_FILES "${AXMP4_SOURCE_PATH}/*.h" "${AXMP4_SOURCE_PATH}/*.cxx" )
 	add_library( AX-MP4 ${AXMP4_SOURCE_FILES} )
 
 	target_include_directories( AX-MP4 PUBLIC "${AXMP4_SOURCE_PATH}" )
 	target_include_directories( AX-MP4 SYSTEM BEFORE PUBLIC "${CINDER_PATH}/include" )
+
+	if(AX_MEDIA_WITH_MKV)
+		target_compile_definitions( AX-MP4 PUBLIC "-DAX_MEDIA_WITH_MKV")
+	endif()
+
+	source_group( TREE ${AXMP4_SOURCE_PATH} FILES ${AXMP4_SOURCE_FILES} )
 
 	if( NOT TARGET cinder )
 		include( "${CINDER_PATH}/proj/cmake/configure.cmake" )

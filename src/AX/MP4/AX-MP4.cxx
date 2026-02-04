@@ -12,9 +12,11 @@
 #include "cinder/app/App.h"
 #include <sstream>
 
+#include <AX/AX-MediaContainer.h>
+
 using namespace ci;
 
-namespace AX
+namespace AX::Media::MP4
 {
     struct StreamAutoAdvancer
     {
@@ -206,7 +208,7 @@ namespace AX
         u32 brand{ 0 };
         stream->readBig<u32> ( &brand );
         
-        _brand = AX::FourCCToString ( brand );
+        _brand = FourCCToString ( brand );
 
         stream->readBig<u32> ( &_minorVersion );
         _compatibleBrands.push_back ( _brand );
@@ -991,26 +993,6 @@ namespace AX
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
     }
 
-    const char * MP4ErrorCodeToString ( MP4ErrorCode code )
-    {
-        static std::unordered_map<MP4ErrorCode, const char *> kTable =
-        {
-            { MP4ErrorCode::Success, "Success" },
-            { MP4ErrorCode::InvalidHeader, "Invalid Header" },
-            { MP4ErrorCode::Unknown, "Unknown" },
-        };
-
-        auto it = kTable.find ( code );
-        if ( it != kTable.end ( ) )
-        {
-            return it->second;
-        } else
-        {
-            static const char * kNull = "Unknown Error";
-            return kNull;
-        }
-    }
-
     MP4Ref MP4::Create ( const fs::path& path, const Format& format )
     {
         if ( !fs::exists ( path ) ) return nullptr;
@@ -1087,8 +1069,7 @@ namespace AX
     };
 
     MP4::MP4 ( const DataSourceRef& source, const Format& format )
-        : _format ( format )
-        , _source ( source )
+		: Container ( ContainerType::MP4, source, format )
     {
         auto containers =
         {
@@ -1158,10 +1139,11 @@ namespace AX
         {
             IStreamRef stream = _source->createStream ( );
             u64 streamSize = stream->size ( );
+			_length = streamSize;
 
             if ( !StartsWithFTYP ( stream ) )
             {
-                _error = MP4ErrorCode::InvalidHeader;
+                _error = ErrorCode::InvalidHeader;
                 return _isValid;
             }
 
@@ -1171,7 +1153,7 @@ namespace AX
             _isValid = true;
         } catch ( const std::exception& )
         {
-            _error = MP4ErrorCode::Unknown;
+            _error = ErrorCode::Unknown;
         }
 
         return _isValid;
@@ -1245,6 +1227,12 @@ namespace AX
         }
     }
 
+	bool MP4::CanProcessSource ( const ci::DataSourceRef & source )
+	{
+		auto mp4 = MP4Ref ( new MP4 ( source, AX::Media::Format{} ) );
+		return mp4->StartsWithFTYP ( source->createStream() );
+	}
+
     void MP4::Dump ( std::ostream& stream, bool verbose ) const
     {
         DumpAtom ( this, stream, verbose );
@@ -1308,82 +1296,30 @@ namespace AX
         }
     }
 
-    MovieRef Movie::Create ( const MP4Ref& mp4 )
+	MP4Movie::MP4Movie ( const ContainerRef & container )
+		: Movie ( container )
     {
-        return MovieRef ( new Movie ( mp4 ) );
-    }
-
-    Movie::Movie ( const MP4Ref& mp4 )
-        : _mp4 ( mp4 )
-    {
-        if ( _mp4 )
+		auto * mp4 = dynamic_cast<MP4 *>( _container.get ( ) );
+        if ( mp4 )
         {
-            auto mdat = _mp4->FindFirstChildAs<MDATAtom> ( AtomType::kMDAT, true );
-            for ( auto& trak : _mp4->FindChildrenAs<ContainerAtom> ( AtomType::kTRAK, true ) )
+            auto mdat = mp4->FindFirstChildAs<MDATAtom> ( AtomType::kMDAT, true );
+            for ( auto& trak : mp4->FindChildrenAs<ContainerAtom> ( AtomType::kTRAK, true ) )
             {
                 assert ( trak->Type ( ) == AtomType::kTRAK );
                 if ( auto hdlr = trak->FindFirstChildAs<HDLRAtom> ( AtomType::kHDLR ) )
                 {
                     auto type = TrackTypeFromHDLRType ( hdlr->Subtype ( ) );
-                    switch ( type )
-                    {
-                        case TrackType::kAudio:
-                        {
-                            _tracks.push_back ( std::make_shared<AudioTrack> ( mdat, trak ) );
-                            break;
-                        }
-                        default:
-                        {
-                            _tracks.push_back ( std::make_shared<Track> ( mdat, trak ) );
-                        }
-                    }
+					(void)type;
+
+					_tracks.push_back ( std::make_shared<MP4Track> ( mdat, trak ) );
                 }
             }
         }
     }
 
-    std::vector<TrackRef> Movie::FindTracks ( TrackType type ) const
-    {
-        std::vector<TrackRef> result;
-        for ( auto& track : _tracks )
-        {
-            if ( track->Type ( ) == type ) result.push_back ( track );
-        }
-        return result;
-    }
-
-    TrackRef Movie::GetTrack ( TrackType type, u32 index ) const
-    {
-        auto tracks = FindTracks ( type );
-        if ( index < tracks.size ( ) ) return tracks[index];
-        return nullptr;
-    }
-
-    Track::AsyncContext::AsyncContext ( )
-        : Work ( asio::make_work_guard ( Io ) )
-    {
-        Thread = std::thread ( [&] 
-        { 
-            setThreadName ( "AX::MP4::TrackDecoder" ); 
-            Io.run ( ); 
-        } );
-    }
-    
-    Track::AsyncContext::~AsyncContext ( )
-    {
-        try
-        {
-            Io.stop ( );
-        } catch ( const std::exception& e )
-        {
-            std::printf ( "Error stopping AsyncContext: %s\n", e.what ( ) );
-        }
-
-        if ( Thread.joinable ( ) ) Thread.join ( );
-    }
-
-    Track::Track ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
-        : _trak ( trak )
+	MP4Track::MP4Track ( const MDATAtomRef & mdat, const ContainerAtomRef & trak )
+		: Track ( TrackType::kUnknown )
+        , _trak ( trak )
         , _mdat ( mdat )
     {
         if ( auto tkhd = trak->FindFirstChildAs<TKHDAtom> ( AtomType::kTKHD ) )
@@ -1398,115 +1334,41 @@ namespace AX
         _stsd = trak->FindFirstChildAs<STSDAtom> ( AtomType::kSTSD );
         _hdlr = trak->FindFirstChildAs<HDLRAtom> ( AtomType::kHDLR );
         _mdhd = trak->FindFirstChildAs<MDHDAtom> ( AtomType::kMDHD );
+
+		if ( !_hdlr.expired ( ) )
+		{
+			_type = TrackTypeFromHDLRType ( _hdlr.lock ( )->Subtype ( ) );
+		}
+
+		if ( auto stsz = _stsz.lock ( ) )
+		{
+			_sampleCount = stsz->GetSampleCount ( );
+		}
+
+		if ( auto mdhd = _mdhd.lock ( ) )
+		{
+			_durationSeconds = mdhd->DurationSeconds ( );
+		}
+
+		if ( auto stsd = _stsd.lock ( ) )
+		{
+			stsd->GetSampleDescription ( 1, _codecId );
+		}
+
+		if ( auto sampleEntry = trak->FindFirstChildOfType<AudioSampleEntryAtom> ( ) )
+		{
+			_sampleRate = sampleEntry->SampleRate ( );
+			_channelCount = sampleEntry->ChannelCount ( );
+		} else
+		{
+			if ( auto mdhd = _mdhd.lock ( ) )
+			{
+				_sampleRate = mdhd->TimeScale ( );
+			}
+		}
     }
 
-    // @note(andrew): Not exhaustive
-    TrackType Track::Type ( ) const
-    {
-        if ( _hdlr.expired() ) return TrackType::kUnknown;
-        return TrackTypeFromHDLRType ( _hdlr.lock ( )->Subtype ( ) );
-    }
-
-    AudioTrack::AudioTrack ( const MDATAtomRef& mdat, const ContainerAtomRef& trak )
-        : Track ( mdat, trak )
-    {
-        if ( auto sampleEntry = trak->FindFirstChildOfType<AudioSampleEntryAtom> ( ) )
-        {
-            _sampleRate = sampleEntry->SampleRate ( );
-            _channelCount = sampleEntry->ChannelCount ( );
-        } else
-        {
-            if ( auto mdhd = _mdhd.lock ( ) )
-            {
-                _sampleRate = mdhd->TimeScale ( );
-            }
-        }
-    }
-
-    void ITrackDecoder::DecodedFrame::SetPixelData ( const ci::Surface8uRef& surface )
-    {
-        _pixelData = surface;
-        PixelBufferSize = surface->getRowBytes ( ) * surface->getHeight ( );
-        PixelBuffer = surface->getData ( );
-    }
-
-    void ITrackDecoder::DecodedFrame::SetPixelData ( const ci::Channel8uRef& channel )
-    {
-        _pixelData = channel;
-        PixelBufferSize = channel->getRowBytes ( ) * channel->getHeight ( );
-        PixelBuffer = channel->getData ( );
-    }
-
-    void ITrackDecoder::DecodedFrame::SetPixelData ( const RawBufferRef& raw )
-    {
-        _pixelData = raw;
-        PixelBufferSize = raw->size ( );
-        PixelBuffer = raw->data ( );
-    }
-
-    ITrackDecoderRef Track::CreateDecoder ( u32 handler ) const
-    {
-        auto it = _decoders.find ( handler );
-        if ( it != _decoders.end ( ) )
-        {
-            return it->second ( );
-        }
-        return nullptr;
-    }
-
-    ITrackDecoderRef Track::DecodeSample ( u32 index ) const
-    {
-        AX::Sample sample{};
-        if ( ReadSample ( index, sample ) )
-        {
-            if ( auto decoder = CreateDecoder ( sample.Handler() ) )
-            {
-                auto success = decoder->Decode ( sample );
-                decoder->_succeeded = success;
-                return decoder;
-            }
-        }
-
-        return nullptr;
-    }
-
-    void Track::DecodeSampleAsync ( u32 index, AsyncDecodeCallback callback ) const
-    {
-        if ( !_async ) _async = std::make_unique<AsyncContext> ( );
-
-        asio::post(_async->Io, [&, index, callback]
-        {
-            Sample sample{};
-            bool success = false;
-            ITrackDecoderRef decoder = nullptr;
-            if ( ReadSample ( index, sample ) )
-            {
-                decoder = DecodeSample ( index );
-                success = decoder != nullptr;
-            }
-
-            app::App::get ( )->dispatchAsync ( [s = success, i = index, cb = callback, dec=decoder]
-            {
-                cb ( i, s, dec );
-            } );
-        } );
-    }
-
-    void Track::ReadSampleAsync ( u32 index, AsyncReadCallback callback ) const
-    {
-        if ( !_async ) _async = std::make_unique<AsyncContext> ( );
-		asio::post(_async->Io, [&, index, callback]
-        {
-            Sample sample{};
-            bool success = ReadSample ( index, sample );
-            app::App::get ( )->dispatchAsync ( [s = success, i = index, cb = callback, sam = std::move ( sample )]
-            {
-                cb ( i, s, std::move(sam) );
-            } );
-        } );
-    }
-
-    bool Track::ReadSample ( u32 index, Sample& sample ) const
+    bool MP4Track::ReadSample ( u32 index, Sample& sample ) const
     {
         if ( _mdat.expired() ) return false;
         if ( _stsz.expired() ) return false;
@@ -1557,24 +1419,5 @@ namespace AX
         }
         
         return false;
-    }
-
-    u32 Track::SampleCount ( ) const
-    {
-        if ( auto stsz = _stsz.lock ( ) )
-        {
-            return stsz->GetSampleCount ( );
-        }
-        return 0;
-    }
-
-    float Track::DurationSeconds ( ) const
-    {
-        if ( auto mdhd = _mdhd.lock ( ) )
-        {
-            return mdhd->DurationSeconds ( );
-        }
-
-        return 0.0f;
     }
 }

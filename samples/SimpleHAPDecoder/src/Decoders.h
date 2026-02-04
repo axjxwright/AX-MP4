@@ -8,22 +8,22 @@
 //  (c) 2026 AX Interactive (axinteractive.com.au)
 //
 
-#include <AX/AX-MP4.h>
+#include <AX/AX-TrackDecoder.h>
 
-class MJPEGDecoder : public AX::ITrackDecoder
+class MJPEGDecoder : public AX::Media::ITrackDecoder
 {
 public:
 	using ITrackDecoder::ITrackDecoder;
 
-	bool                Decode ( const AX::Sample& sample ) override;
-	ci::gl::TextureRef  CreateTexture ( AX::u32 index, const ci::gl::Texture::Format& fmt = ci::gl::Texture::Format() ) const override;
+	bool                Decode ( const AX::Media::Sample& sample ) override;
+	ci::gl::TextureRef  CreateTexture ( uint32_t index, const ci::gl::Texture::Format& fmt = ci::gl::Texture::Format() ) const override;
 };
 
-class HAPDecoder : public AX::ITrackDecoder
+class HAPDecoder : public AX::Media::ITrackDecoder
 {
 public:
 	using ITrackDecoder::ITrackDecoder;
 
-	bool                Decode ( const AX::Sample& sample ) override;
-	ci::gl::TextureRef  CreateTexture ( AX::u32 index, const ci::gl::Texture::Format& fmt = ci::gl::Texture::Format ( ) ) const override;
+	bool                Decode ( const AX::Media::Sample& sample ) override;
+	ci::gl::TextureRef  CreateTexture ( uint32_t index, const ci::gl::Texture::Format& fmt = ci::gl::Texture::Format ( ) ) const override;
 };

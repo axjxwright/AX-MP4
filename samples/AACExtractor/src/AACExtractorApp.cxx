@@ -6,7 +6,7 @@
 //  (c) 2026 AX Interactive (axinteractive.com.au)
 //
 
-#include <AX/AX-MP4.h>
+#include <AX/AX-MediaContainer.h>
 
 #include "cinder/app/App.h"
 #include "cinder/app/RendererGl.h"
@@ -38,12 +38,12 @@ public:
 
 protected:
 
-    void                            ExtractAAC    ( const AX::AudioTrackRef& track );
-    bool                            LoadMP4       ( const DataSourceRef& source );
+    void                            ExtractAudio    ( const AX::Media::TrackRef& track );
+    bool                            LoadMedia     ( const DataSourceRef& source );
 
-    AX::MP4Ref                      _mp4;
-    AX::MovieRef                    _movie;
-    AX::AudioTrackRef               _track{ nullptr };
+    AX::Media::ContainerRef			_container;
+    AX::Media::MovieRef				_movie;
+    AX::Media::TrackRef				_track{ nullptr };
     
     audio::FilePlayerNodeRef        _player;
     audio::MonitorNodeRef           _fft;
@@ -56,10 +56,10 @@ void AACDecoderApp::setup ( )
 
     ui::Initialize ( );
     
-    LoadMP4 ( loadAsset ( "sample-3.m4a" ) );
+    LoadMedia ( loadAsset ( "sample-3.m4a" ) );
 }
 
-bool AACDecoderApp::LoadMP4 ( const DataSourceRef& source )
+bool AACDecoderApp::LoadMedia ( const DataSourceRef& source )
 {
     if ( _player )
     {
@@ -77,23 +77,23 @@ bool AACDecoderApp::LoadMP4 ( const DataSourceRef& source )
 
     try
     {
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties(true).PreloadIntoMemory(true) );
-        if ( _mp4 )
+        _container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties(true).PreloadIntoMemory(true) );
+        if ( _container )
         {
-            if ( _mp4->IsValid ( ) )
+            if ( _container->IsValid ( ) )
             {
-                _movie = AX::Movie::Create ( _mp4 );
-                if ( auto track = _movie->GetTrack ( AX::TrackType::kAudio, 0 ) )
+                _movie = AX::Media::Movie::Create ( _container );
+                if ( auto track = _movie->GetTrack ( AX::Media::TrackType::kAudio, 0 ) )
                 {
-                    _track = track->TryCast<AX::AudioTrack> ( );
-                    ExtractAAC ( _track );
+					_track = track;
+                    ExtractAudio ( _track );
                 }
-                _mp4->Dump ( std::cout, true );
+                //_container->Dump ( std::cout, true );
                 
                 return true;
             } else
             {
-                std::printf ( "Error loading MP4: %s\n", AX::MP4ErrorCodeToString ( _mp4->Error ( ) ) );
+				std::printf ( "Error loading MP4: %s\n", AX::Media::ErrorCodeToString ( _container->Error ( ) ) );
             }
         }
     } catch ( const std::exception& e )
@@ -111,7 +111,7 @@ void AACDecoderApp::update ( )
 
 void AACDecoderApp::fileDrop ( FileDropEvent event )
 {
-    LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
+    LoadMedia ( loadFile ( event.getFile ( 0 ) ) );
 }
 
 struct ADTSHeader
@@ -180,28 +180,31 @@ std::vector<uint8_t> GenerateADTSHeader ( AX::u32 sampleRate, AX::u32 channelCou
     return result;
 }
 
-void AACDecoderApp::ExtractAAC ( const AX::AudioTrackRef& track )
+void AACDecoderApp::ExtractAudio ( const AX::Media::TrackRef& track )
 {
-    std::vector<AX::u8> aac;
+    std::vector<AX::u8> audio;
     for ( AX::u32 i = 0; i < track->SampleCount ( ); i++ )
     {
-        AX::Sample sample;
+		AX::Media::Sample sample;
         if ( track->ReadSample ( i, sample ) )
         {
-            // @FIXME(andrew): Occasionally the channel count reported
+			// @FIXME(andrew): Occasionally the channel count reported
             // by the file is incorrect. Need to parse the ESDS descriptors
             // to get the actual correct channel counts.
             auto channelCount = track->ChannelCount ( );
             auto sampleRate = track->SampleRate();
             
-            auto header = GenerateADTSHeader ( sampleRate, channelCount, sample.Length() );
-
-            std::copy ( header.begin(), header.end(), std::back_inserter ( aac ) );
-            std::copy ( sample.Data ( ), sample.Data ( ) + sample.Length ( ), std::back_inserter ( aac ) );
+			// @note(andrew): Prepend ADTS header to AAC samples
+			if ( track->CodecId ( ) == 'mp4a' )
+			{
+				auto header = GenerateADTSHeader ( sampleRate, channelCount, sample.Length ( ) );
+				std::copy ( header.begin ( ), header.end ( ), std::back_inserter ( audio ) );
+			}
+            std::copy ( sample.Data ( ), sample.Data ( ) + sample.Length ( ), std::back_inserter ( audio ) );
         }
     }
 
-    auto stream = IStreamMem::create ( aac.data ( ), aac.size ( ) );
+    auto stream = IStreamMem::create ( audio.data ( ), audio.size ( ) );
     auto file = audio::load ( DataSourceBuffer::create ( loadStreamBuffer ( stream ) ) );
     
     std::printf ( "duration: %.2f\n", file->getNumSeconds ( ) );
@@ -217,21 +220,20 @@ void AACDecoderApp::ExtractAAC ( const AX::AudioTrackRef& track )
     _fft->enable ( );
 }
 
-static void Inspect ( AX::Atom* atom )
+static void Inspect ( AX::IInspectable* item )
 {
-    ui::ScopedId id{ atom };
-    if ( ui::TreeNode ( AX::AtomTypeToString ( atom->Type ( ) ).c_str ( ) ) )
+    ui::ScopedId id{ item };
+    if ( ui::TreeNode ( item->InspectableValue().c_str() ) )
     {
-        for ( auto& [name, value] : atom->Properties ( ) )
+        for ( auto& [name, value] : item->Properties ( ) )
         {
             ui::BulletText ( "%s = %s", name.c_str ( ), value.c_str ( ) );
         }
-        if ( atom->IsContainer ( ) )
+        if ( item->HasInspectableChildren ( ) )
         {
-            auto* container = static_cast<AX::ContainerAtom*> ( atom );
-            for ( auto& child : container->GetChildren ( ) )
+            for ( auto& child : item->InspectableChildren ( ) )
             {
-                Inspect ( child.get ( ) );
+                Inspect ( child );
             }
         }
         ui::TreePop ( );
@@ -245,7 +247,7 @@ void AACDecoderApp::draw ( )
         static auto kRenderer = gl::getString ( GL_RENDERER );
 
         ui::ScopedWindow window{ "Settings" };
-        ui::Text ( "AX AAC Extraction | FPS %.2f | %s", getAverageFps ( ), kRenderer.c_str() );
+        ui::Text ( "AX Audio Extraction | FPS %.2f | %s", getAverageFps ( ), kRenderer.c_str() );
 
         if ( _player )
         {
@@ -275,7 +277,7 @@ void AACDecoderApp::draw ( )
             }
         }
 
-        if ( _mp4 ) Inspect ( _mp4.get ( ) );
+        if ( _container ) Inspect ( *_container );
     }
 }
 

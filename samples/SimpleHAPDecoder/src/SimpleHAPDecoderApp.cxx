@@ -6,7 +6,7 @@
 //  (c) 2026 AX Interactive (axinteractive.com.au)
 //
 
-#include <AX/AX-MP4.h>
+#include <AX/MP4/AX-MP4.h>
 #include "Decoders.h"
 
 #include "cinder/app/App.h"
@@ -199,23 +199,24 @@ public:
 
 protected:
 
-    bool            LoadMP4             ( const DataSourceRef& source );
+    bool            LoadMedia           ( const DataSourceRef& source );
     void            DecodeFrameAt       ( int index );
     void            DecodeFrameAtAsync  ( int index );
-    void            OnSampleDecoded     ( const AX::ITrackDecoderRef& decoded );
+    void            OnSampleDecoded     ( const AX::Media::ITrackDecoderRef& decoded );
+
+    AX::Media::ITrackDecoderRef	_decoded;
+    gl::TextureRef			_frame;
+    
+    gl::TextureRef			_YCoCgPlane;
+    gl::TextureRef			_alphaPlane;
+    
+    AX::Media::ContainerRef _container;
+    AX::Media::MovieRef		_movie;
+    AX::Media::TrackRef		_track{ nullptr };
 
     int                     _currentSample{ 0 };
-    AX::ITrackDecoderRef    _decoded;
-    gl::TextureRef  _frame;
-    
-    gl::TextureRef  _YCoCgPlane;
-    gl::TextureRef  _alphaPlane;
-    
-    AX::MP4Ref      _mp4;
-    AX::MovieRef    _movie;
-    AX::TrackRef    _track{ nullptr };
-    float           _playRate{ 0.0f };
-    float           _time{ 0 };
+    float					_playRate{ 1.0f };
+    float					_time{ 0 };
     
     bool                    _async{ false };
     circular_buffer<float>  _decodeTimeHistory{ 64 };
@@ -230,12 +231,15 @@ void SimpleHAPDecoderApp::setup ( )
 
     ui::Initialize ( );
     AX::InitLivePP ( );
-    
-    if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
+
+	LoadMedia ( loadFile ( "C:\\Users\\msfts\\Downloads\\Shoresy\\Shoresy.S05E02.The.Great.One.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv" ) );
+	return;
+
+	if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
         // Sample HAP videos downloadable from
         // https://docs.vidvox.net/vdmx/vdmx_sample_media.html#momo-the-monster-middlman-pacific-coast
-        LoadMP4 ( loadAsset ( "Videos/Drums_Fill1_BG.mov" ) );
+        LoadMedia ( loadAsset ( "Videos/Drums_Fill1_BG.mov" ) );
         
     } else
     {
@@ -250,26 +254,32 @@ const uint32_t kHAPY = 'HapY';
 const uint32_t kHAPM = 'HapM';
 const uint32_t kJPEG = 'jpeg';
 
-bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
+bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
 {
+	Timer timer{ true };
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
-        _mp4 = AX::MP4::Create ( source, AX::MP4::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
-        if ( _mp4 )
+		_container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
+        if ( _container )
         {
-            if ( _mp4->IsValid ( ) )
+            if ( _container->IsValid ( ) )
             {
-                _movie = AX::Movie::Create ( _mp4 );
-                _track = _movie->GetTrack ( AX::TrackType::kVideo, 0 );
-                _track->RegisterDecoder<HAPDecoder> ( kHAP1 );
-                _track->RegisterDecoder<HAPDecoder> ( kHAP5 );
-                _track->RegisterDecoder<HAPDecoder> ( kHAP7 );
-                _track->RegisterDecoder<HAPDecoder> ( kHAPY );
-                _track->RegisterDecoder<HAPDecoder> ( kHAPM );
-                _track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
+                _movie = AX::Media::Movie::Create ( _container );
+                _track = _movie->GetTrack ( AX::Media::TrackType::kVideo, 0 );
+				if ( _track )
+				{
+					_track->RegisterDecoder<HAPDecoder> ( kHAP1 );
+					_track->RegisterDecoder<HAPDecoder> ( kHAP5 );
+					_track->RegisterDecoder<HAPDecoder> ( kHAP7 );
+					_track->RegisterDecoder<HAPDecoder> ( kHAPY );
+					_track->RegisterDecoder<HAPDecoder> ( kHAPM );
+					_track->RegisterDecoder<MJPEGDecoder> ( kJPEG );
+				}
 
-                _mp4->Dump ( std::cout, true );
+				std::printf ( "Loaded in %.2fms\n", timer.getSeconds ( ) * 1000.0 );
+
+				//_container->Dump ( std::cout, true );
 
                 _currentSample = 0;
                 _time = 0.0f;
@@ -278,12 +288,12 @@ bool SimpleHAPDecoderApp::LoadMP4 ( const DataSourceRef& source )
                 return true;
             } else
             {
-                std::printf ( "Error loading MP4: %s\n", AX::MP4ErrorCodeToString ( _mp4->Error ( ) ) );
+				std::printf ( "Error loading Media: %s\n", AX::Media::ErrorCodeToString ( _container->Error ( ) ) );
             }
         }
-    } catch ( const std::exception& e )
+    }catch ( const std::exception & e )
     {
-        std::printf ( "Error loading MP4: %s\n", e.what ( ) );
+        std::printf ( "Error loading Media: %s\n", e.what ( ) );
     }
 
     return false;
@@ -317,7 +327,7 @@ void SimpleHAPDecoderApp::update ( )
 
 void SimpleHAPDecoderApp::fileDrop ( FileDropEvent event )
 {
-    LoadMP4 ( loadFile ( event.getFile ( 0 ) ) );
+    LoadMedia ( loadFile ( event.getFile ( 0 ) ) );
 }
 
 void SimpleHAPDecoderApp::DecodeFrameAt ( int index )
@@ -333,7 +343,7 @@ void SimpleHAPDecoderApp::DecodeFrameAt ( int index )
     }
 }
 
-void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::ITrackDecoderRef& decoder )
+void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::Media::ITrackDecoderRef& decoder )
 {
     assert ( app::isMainThread ( ) );
 
@@ -366,28 +376,27 @@ void SimpleHAPDecoderApp::OnSampleDecoded ( const AX::ITrackDecoderRef& decoder 
 void SimpleHAPDecoderApp::DecodeFrameAtAsync ( int index )
 {
     if ( !_track ) return;
-    _track->DecodeSampleAsync ( index, [=]( uint32_t, bool succeeded, const AX::ITrackDecoderRef& decoded )
+    _track->DecodeSampleAsync ( index, [=]( uint32_t, bool succeeded, const AX::Media::ITrackDecoderRef& decoded )
     {
         if ( succeeded ) OnSampleDecoded ( decoded );
     } );
 }
 
-static void Inspect ( AX::Atom* atom )
+static void Inspect ( AX::IInspectable* item )
 {
-    ui::ScopedId id{ atom };
+    ui::ScopedId id{ item };
     
-    if ( ui::TreeNodeEx ( AX::AtomTypeToString ( atom->Type ( ) ).c_str ( ), ImGuiTreeNodeFlags_SpanFullWidth ) )
+    if ( ui::TreeNodeEx ( item->InspectableValue().c_str ( ), ImGuiTreeNodeFlags_SpanFullWidth ) )
     {
-        for ( auto& [name, value] : atom->Properties ( ) )
+        for ( auto & [name, value] : item->Properties ( ) )
         {
             ui::BulletText ( "%s = %s", name.c_str ( ), value.c_str ( ) );
         }
-        if ( atom->IsContainer ( ) )
+        if ( item->HasInspectableChildren( ) )
         {
-            auto* container = static_cast<AX::ContainerAtom*> ( atom );
-            for ( auto& child : container->GetChildren ( ) )
+            for ( auto& child : item->InspectableChildren ( ) )
             {
-                Inspect ( child.get ( ) );
+                Inspect ( child );
             }
         }
         ui::TreePop ( );
@@ -472,7 +481,7 @@ void SimpleHAPDecoderApp::draw ( )
             ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
-        if ( _mp4 ) Inspect ( _mp4.get ( ) );
+		if ( _container ) Inspect ( *_container.get ( ) );
     }
 
     if ( _YCoCgPlane )
