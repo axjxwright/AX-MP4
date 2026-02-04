@@ -76,7 +76,6 @@ namespace AX::Media::MKV
 		using Element::Element;
 		virtual bool		Parse ( MKV & context, const ci::IStreamRef & stream, usz length ) override;
 
-
 		virtual ElementRef  FindFirstChild ( MatroskaElementId type, bool recursive = true ) const;
 		virtual ElementList	FindChildren ( MatroskaElementId type, bool recursive = true ) const;
 		const ElementList&	GetChildren ( ) const { return _children; }
@@ -152,6 +151,12 @@ namespace AX::Media::MKV
 		u64				_blockLength{ 0 };
 	};
 
+	class BlockElement : public SimpleBlockElement
+	{
+	public:
+		using SimpleBlockElement::SimpleBlockElement;
+	};
+
 	using TrackElementRef	= std::shared_ptr<class TrackElement>;
 	class TrackElement		: public MasterElement
 	{
@@ -181,6 +186,18 @@ namespace AX::Media::MKV
 		u32					_height{ 0 };
 		BlockList			_blocks;
 		ci::IStreamRef		_stream;
+	};
+
+	using SkipElementRef = std::shared_ptr<class SkipElement>;
+	class SkipElement : public Element
+	{
+	public:
+		using Element::Element;
+		virtual bool Parse ( MKV & context, const ci::IStreamRef & stream, usz length ) override
+		{
+			stream->seekRelative ( length );
+			return true;
+		}
 	};
 
 	using ElementFactoryFn = std::function<ElementRef(MatroskaIdentifier)>;
@@ -239,13 +256,6 @@ namespace AX::Media::MKV
 
 		TrackElementRef	_track;
 		ci::IStreamRef	_stream;
-	};
-
-	using MKVAudioTrackRef = std::shared_ptr<class MKVAudioTrack>;
-	class MKVAudioTrack : public MKVTrack
-	{
-	public:
-		MKVAudioTrack ( const TrackElementRef & track );
 	};
 }
 

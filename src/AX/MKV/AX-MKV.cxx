@@ -300,9 +300,10 @@ namespace AX::Media::MKV
 				stream = IStreamMem::create ( _buffer->getData ( ), _buffer->getSize ( ) );
 			}
 
+			stream->seekAbsolute ( 0 );
+
 			u64 streamSize = stream->size ( );
 			_length = streamSize;
-
 
 			if ( !StartsWithEBML ( stream ) )
 			{
@@ -374,7 +375,7 @@ namespace AX::Media::MKV
 				}
 				default:
 				{
-					if ( identifier.ID == MatroskaElementId::kSimpleBlock )
+					if ( identifier.ID == MatroskaElementId::kSimpleBlock || identifier.ID == MatroskaElementId::kBlock )
 					{
 						auto element = std::make_shared<SimpleBlockElement> ( identifier );
 						element->Parse ( *this, stream, size );
@@ -676,7 +677,7 @@ namespace AX::Media::MKV
 						_handler = 'Hap1';
 					}
 				}
-			} else
+			} else if ( _trackType == TrackType::kAudio )
 			{
 				if ( _codecId == "A_EAC3" )
 				{
@@ -684,6 +685,18 @@ namespace AX::Media::MKV
 				} else if ( _codecId.find ( "AAC" ) != std::string::npos )
 				{
 					_handler = 'mp4a';
+				}
+			} else if ( _trackType == TrackType::kSubtitles )
+			{
+				std::printf ( "Subs!\n" );
+				if ( auto priv = FindFirstChild ( MatroskaElementId::kCodecPrivate ) )
+				{
+					// @note(andrew): This buffer is actually an STSD Atom from
+					// the mp4 container format. Skip the fourcc + size bytes
+					// to read the codec id.
+
+					auto data = priv->Value<std::vector<u8>> ( );
+					std::string_view view{ (char *)data.data ( ), data.size ( ) };
 				}
 			}
 		}
@@ -720,6 +733,18 @@ namespace AX::Media::MKV
 	void TrackElement::CollectSamples ( MKV & container )
 	{
 		auto blocks = container.FindChildren ( MatroskaElementId::kSimpleBlock );
+		for ( auto & b : blocks )
+		{
+			if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
+			{
+				if ( block->TrackNumber ( ) == TrackNumber ( ) )
+				{
+					_blocks.push_back ( block );
+				}
+			}
+		}
+
+		blocks = container.FindChildren ( MatroskaElementId::kBlock );
 		for ( auto & b : blocks )
 		{
 			if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
@@ -881,12 +906,6 @@ namespace AX::Media::MKV
 				}
 			}
 		}
-	}
-
-	MKVAudioTrack::MKVAudioTrack ( const TrackElementRef & track )
-		: MKVTrack ( track )
-	{
-		
 	}
 
 	bool MKVTrack::ReadSample ( u32 index, Sample & sample ) const

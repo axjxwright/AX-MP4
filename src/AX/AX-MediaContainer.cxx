@@ -13,6 +13,7 @@
 
 #include <AX/MP4/AX-MP4.h>
 #include <AX/MKV/AX-MKV.h>
+#include <AX/AVI/AX-AVI.h>
 
 using namespace ci;
 
@@ -64,6 +65,13 @@ namespace AX::Media
 		}
 		#endif
 
+		#if AX_MEDIA_WITH_AVI
+		if ( AVI::AVI::CanProcessSource ( source ) )
+		{
+			return AVI::AVI::Create ( source, format );
+		}
+		#endif
+
 		return nullptr;
 	}
 
@@ -75,12 +83,18 @@ namespace AX::Media
 	{
 		switch ( container->Type ( ) )
 		{
-#ifdef AX_MEDIA_WITH_MKV
+			#ifdef AX_MEDIA_WITH_MKV
 			case ContainerType::MKV:
 			{
 				return MKV::MKVMovieRef ( new MKV::MKVMovie ( container ) );
 			}
-#endif
+			#endif
+			#ifdef AX_MEDIA_WITH_MKV
+			case ContainerType::AVI:
+			{
+				return AVI::AVIMovieRef ( new AVI::AVIMovie ( container ) );
+			}
+			#endif
 			case ContainerType::MP4 :
 			default:
 			{

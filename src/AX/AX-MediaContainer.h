@@ -50,7 +50,7 @@ namespace AX
 		enum class ErrorCode
 		{
 			Success,
-			InvalidHeader, // Doesn't start with FTYP atom
+			InvalidHeader, // Doesn't start with FTYP/EBML/RIFF depending on format
 			Unknown
 		};
 
@@ -60,7 +60,10 @@ namespace AX
 		{
 			MP4,
 			#ifdef AX_MEDIA_WITH_MKV
-			MKV
+			MKV,
+			#endif
+			#ifdef AX_MEDIA_WITH_AVI
+			AVI,
 			#endif
 		};
 

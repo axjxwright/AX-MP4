@@ -1,6 +1,7 @@
 if( NOT TARGET AX-MP4 )
 
 	option( AX_MEDIA_WITH_MKV "Compile with MKV Container support" ON )
+	option( AX_MEDIA_WITH_AVI "Compile with AVI Container support" OFF )
 
 	get_filename_component( AXMP4_SOURCE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../src" ABSOLUTE )
 	get_filename_component( CINDER_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE )
@@ -13,6 +14,10 @@ if( NOT TARGET AX-MP4 )
 
 	if(AX_MEDIA_WITH_MKV)
 		target_compile_definitions( AX-MP4 PUBLIC "-DAX_MEDIA_WITH_MKV")
+	endif()
+
+	if(AX_MEDIA_WITH_AVI)
+		target_compile_definitions( AX-MP4 PUBLIC "-DAX_MEDIA_WITH_AVI")
 	endif()
 
 	source_group( TREE ${AXMP4_SOURCE_PATH} FILES ${AXMP4_SOURCE_FILES} )
