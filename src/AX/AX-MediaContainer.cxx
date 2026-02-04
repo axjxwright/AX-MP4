@@ -89,7 +89,7 @@ namespace AX::Media
 				return MKV::MKVMovieRef ( new MKV::MKVMovie ( container ) );
 			}
 			#endif
-			#ifdef AX_MEDIA_WITH_MKV
+			#ifdef AX_MEDIA_WITH_AVI
 			case ContainerType::AVI:
 			{
 				return AVI::AVIMovieRef ( new AVI::AVIMovie ( container ) );

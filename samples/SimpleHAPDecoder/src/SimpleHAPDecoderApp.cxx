@@ -232,9 +232,6 @@ void SimpleHAPDecoderApp::setup ( )
     ui::Initialize ( );
     AX::InitLivePP ( );
 
-	LoadMedia ( loadFile ( "C:\\Users\\msfts\\Downloads\\Shoresy\\Shoresy.S05E02.The.Great.One.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv" ) );
-	return;
-
 	if ( !app::getAssetPath ( "Videos/Drums_Fill1_BG.mov" ).empty() )
     {
         // Sample HAP videos downloadable from
