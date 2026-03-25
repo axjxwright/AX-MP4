@@ -119,6 +119,18 @@ namespace AX::Media::MKV
 		std::vector<ElementRef> _children;
 	};
 
+	using ClusterElementRef = std::shared_ptr<class ClusterElement>;
+	class ClusterElement : public MasterElement
+	{
+	public:
+		using MasterElement::MasterElement;
+		virtual bool	Parse ( MKV & context, const ci::IStreamRef & stream, usz length ) override;
+		u64				Timestamp ( ) const { return _timestamp; };
+	;
+	protected:
+		u64				_timestamp{ 0 };
+	};
+
 	using SimpleBlockElementRef = std::shared_ptr<class SimpleBlockElement>;
 	using BlockList = std::vector<SimpleBlockElementRef>;
 	class SimpleBlockElement : public Element
@@ -131,8 +143,10 @@ namespace AX::Media::MKV
 		u64				LengthInStream ( ) const { return _lengthInStream; };
 		u8				TrackNumber ( ) const { return _trackNumber; }
 		u16				Timestamp ( ) const { return _timestamp; }
+		float			AbsoluteTimestampSeconds ( ) const { return _absoluteTimestampSeconds; }
+		void			SetAbsoluteTimestampSeconds ( float timestamp ) { _absoluteTimestampSeconds = timestamp; }
 		bool			IsKeyframe ( ) const { return _isKeyframe; }
-		
+
 		bool			IsZeroCopy ( ) const { return _isZeroCopy; }
 		const u8 *		ZeroCopyData ( ) const;
 		std::vector<u8>	Data ( ) const;
@@ -142,6 +156,7 @@ namespace AX::Media::MKV
 		usz				_lengthInStream;
 		u8				_trackNumber{ 0 };
 		u16				_timestamp{ 0 };
+		float			_absoluteTimestampSeconds{ 0.0f };
 		bool			_isKeyframe{ false };	
 		u64				_offsetFromStartOfFile{ 0 };
 		std::vector<u8>	_data;
@@ -171,6 +186,7 @@ namespace AX::Media::MKV
 		float				Duration ( ) const { return _duration; }
 		u32					Width ( ) const { return _width; }
 		u32					Height ( ) const { return _height; }
+		
 		const BlockList &	Blocks ( ) const { return _blocks; }
 
 		void				CollectSamples ( MKV & container );
@@ -211,6 +227,7 @@ namespace AX::Media::MKV
 		static MKVRef       Create ( const ci::DataSourceRef & source, const Format & format = Format ( ) );
 
 		virtual bool		Parse ( MKV & context, const ci::IStreamRef & stream, usz length ) override;
+		u64					TimestampScale ( ) const { return _timestampScale; }
 
 		ElementRef          ReadNextElement ( const ci::IStreamRef& stream );
 		void                Dump ( std::ostream & stream, bool verbose = false ) const override;
@@ -236,6 +253,7 @@ namespace AX::Media::MKV
 		ElementStack		_stack;
 		FactoryMap			_factories;
 		ci::BufferRef		_buffer;
+		u64					_timestampScale{ 1 };
 	};
 
 	using MKVMovieRef = std::shared_ptr<class MKVMovie>;

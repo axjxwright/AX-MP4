@@ -26,21 +26,25 @@ namespace AX
 		{
 		public:
 			Sample ( ) { };
-			Sample ( u32 handler, const u8 * data, u32 length, u32 index, const ivec2 & size )
+			Sample ( u32 handler, const u8 * data, u32 length, u32 index, float time, const ivec2 & size, u8 depth )
 				: _handler ( handler )
 				, _data ( data )
 				, _length ( length )
 				, _ownsData ( false )
 				, _index ( index )
+				, _time ( time )
 				, _size ( size )
+				, _depth ( depth )
 			{ }
-			Sample ( u32 handler, const std::vector<u8> & data, u32 index, const ivec2 & size )
+			Sample ( u32 handler, const std::vector<u8> & data, u32 index, float time, const ivec2 & size, u8 depth )
 				: _handler ( handler )
 				, _data ( data )
 				, _length ( static_cast<u32>( data.size ( ) ) )
 				, _ownsData ( true )
 				, _index ( index )
+				, _time ( time )
 				, _size ( size )
+				, _depth ( depth )
 			{ }
 
 			u32				Handler ( ) const { return _handler; }
@@ -51,6 +55,8 @@ namespace AX
 			const ivec2 &	Dimensions ( ) const { return _size; }
 			u32				Width ( ) const { return _size.x; }
 			u32				Height ( ) const { return _size.y; }
+			float			Timestamp ( ) const { return _time; }
+			u8				BitDepth ( ) const { return _depth; }
 
 		protected:
 
@@ -60,7 +66,9 @@ namespace AX
 			u32             _length{ 0 };
 			bool            _ownsData{ false };
 			u32             _index{ 0 };
+			float			_time{ 0.0f };
 			ivec2			_size;
+			u8				_depth{ 0 };
 			DataUnion       _data;
 		};
 
@@ -77,6 +85,7 @@ namespace AX
 				u32                 Width{ 0 };
 				u32                 Height{ 0 };
 				float               DecodeTime{ 0.0f };
+				float				Timestamp{ 0.0f };
 				u32                 Channels{ 0 };
 
 				u64                 PixelBufferSize{ 0 };

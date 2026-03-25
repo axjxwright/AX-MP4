@@ -257,7 +257,7 @@ bool SimpleHAPDecoderApp::LoadMedia ( const DataSourceRef& source )
     try
     {
         _frame = _YCoCgPlane = _alphaPlane = nullptr;
-		_container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties ( true ).PreloadIntoMemory ( true ) );
+		_container = AX::Media::Container::Create ( source, AX::Media::Format{}.TrackProperties ( true ).PreloadIntoMemory ( false ) );
         if ( _container )
         {
             if ( _container->IsValid ( ) )
@@ -457,7 +457,7 @@ void SimpleHAPDecoderApp::draw ( )
             kHighWatermark = std::max ( kHighWatermark, avg );
             
             ui::Text ( "Average Decode Time: %.4fms", avg );
-            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
+            ui::PlotLines ( "##decode", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
         if ( !_fpsHistory.empty ( ) )
@@ -475,7 +475,7 @@ void SimpleHAPDecoderApp::draw ( )
             kHighWatermark = lerp ( kHighWatermark, getAverageFps(), 0.0001f );
             
             ui::Text ( "FPS History" );
-            ui::PlotLines ( "##", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
+            ui::PlotLines ( "##fps", samples.data ( ), static_cast<int> ( samples.size ( ) ), 0, nullptr, 0.0f, kHighWatermark, ImVec2 ( 0, 32 ) );
         }
 
 		if ( _container ) Inspect ( *_container.get ( ) );

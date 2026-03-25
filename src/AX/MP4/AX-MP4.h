@@ -196,6 +196,14 @@ namespace AX::Media::MP4
         kDATA = AX_FOURCC ( 'd', 'a', 't', 'a' ),
         k_TOO = AX_FOURCC ( '©', 't', 'o', 'o' ), //'©too';
         k_SWR = AX_FOURCC ( '©', 's', 'w', 'r' ), //'©swr';
+
+        kRLE_ = AX_FOURCC ( 'r', 'l', 'e', ' ' ),
+        kHAP1 = AX_FOURCC ( 'H', 'a', 'p', '1' ),
+        kHAP5 = AX_FOURCC ( 'H', 'a', 'p', '5' ),
+        kHAP7 = AX_FOURCC ( 'H', 'a', 'p', '7' ),
+        kHAPY = AX_FOURCC ( 'H', 'a', 'p', 'Y' ),
+        kHAPM = AX_FOURCC ( 'H', 'a', 'p', 'M' ),
+        kJPEG = AX_FOURCC ( 'j', 'p', 'e', 'g' ),
     };
 
     enum class HDLRType : u32
@@ -829,6 +837,7 @@ namespace AX::Media::MP4
 		Weak<STCOAtom>          _stco{ };
 		Weak<STSCAtom>          _stsc{ };
 		Weak<STSDAtom>          _stsd{ };
+        Weak<STTSAtom>          _stts{ };
 		Weak<MDATAtom>          _mdat{ };
 		Weak<HDLRAtom>          _hdlr{ };
 		Weak<MDHDAtom>          _mdhd{ };

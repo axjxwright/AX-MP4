@@ -35,6 +35,7 @@ bool MJPEGDecoder::Decode ( const AX::Media::Sample& sample )
         frame.Index = sample.Index ( );
         frame.Width = surface->getWidth ( );
         frame.Height = surface->getHeight ( );
+        frame.Timestamp = sample.Timestamp ( );
         frame.SetPixelData ( surface );
         
         return true;
@@ -105,7 +106,6 @@ bool HAPDecoder::Decode ( const AX::Media::Sample& sample )
         unsigned long actualSize{ 0 };
         auto DecodeCallback = []( HapDecodeWorkFunction function, void* p, uint32_t count, void* )
         {
-            std::printf ( "DecodeCallback: %d\n", count );
             for ( uint32_t i = 0; i < count; i++ )
             {
                 function ( p, i );
@@ -117,7 +117,8 @@ bool HAPDecoder::Decode ( const AX::Media::Sample& sample )
         frame.Width = sample.Width ( );
         frame.Height = sample.Height ( );
         frame.IsCompressed = true;
-        
+        frame.Timestamp = sample.Timestamp ( );
+
         unsigned long estimate = EstimateUncompressedLength ( static_cast<HapTextureFormat>(formats[index]) );
         auto buffer = std::make_shared<std::vector<AX::u8>> ( );
         buffer->resize ( estimate );

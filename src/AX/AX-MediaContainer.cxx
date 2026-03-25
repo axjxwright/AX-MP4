@@ -179,10 +179,16 @@ namespace AX::Media
 
 	void Track::DecodeSampleAsync ( u32 index, AsyncDecodeCallback callback ) const
 	{
+		// @TODO(andrew): Atomic semaphore that caps the amount of frames
+		// that can be queued at once, semaphore++ when queued, semaphore-- when
+		// firing the callback
+
 		if ( !_async ) _async = std::make_unique<AsyncContext> ( );
 
 		asio::post ( _async->Io, [&, index, callback]
 		{
+			if ( !_async.get ( ) ) return;
+
 			Sample sample{};
 			bool success = false;
 			ITrackDecoderRef decoder = nullptr;
@@ -211,5 +217,11 @@ namespace AX::Media
 				cb ( i, s, std::move ( sam ) );
 			} );
 		} );
+	}
+
+	Track::~Track ( )
+	{
+		_async = nullptr;
+		_decoders.clear ( );
 	}
 }

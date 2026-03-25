@@ -103,6 +103,7 @@ namespace AX
 		{
 		public:
 			Track				( TrackType type ) : _type ( type ) { }
+			~Track				( );
 
 			using               AsyncReadCallback = std::function<void ( u32, bool, const Sample && )>;
 			using               AsyncDecodeCallback = std::function<void ( u32, bool, const ITrackDecoderRef & )>;

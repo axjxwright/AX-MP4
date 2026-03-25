@@ -679,6 +679,11 @@ namespace AX::Media::MP4
                 WriteProperty ( "length", expectedLength );
                 WriteProperty ( "num_entries", _entries.size ( ) );
             }
+
+            if ( _entryCount > 1 )
+            {
+                std::printf ( "**** WARNING: This is likely a variable framerate file, timestamps currently assume constant framerate ****\n" );
+            }
         }
 
         stream->seekRelative ( static_cast<off_t> ( expectedLength - delta ) );
@@ -816,8 +821,22 @@ namespace AX::Media::MP4
             stream->readBig<u16> ( &_height );
             stream->readBig<u32> ( &_horzResolution );
             stream->readBig<u32> ( &_vertResolution );
-            stream->readFixedString ( &_compressor, 32 );
-            stream->readBig<u16> ( &_depth );
+
+            u32 dataSize{ };
+            stream->readBig<u32> ( &dataSize );
+
+            u16 frameCount{ 0 };
+            stream->readBig<u16> ( &frameCount );
+
+            // @NOTE(andrew): https://developer.apple.com/standards/qtff-2001.pdf p92
+            // Compressor is a 32 byte string regardless of the prepended length
+            {
+                u8 length{};
+                stream->read<u8> ( &length );
+                stream->readFixedString ( &_compressor, 31 );
+            }
+
+            stream->readBig ( &_depth );
 
             _horzResolution /= 65536;
             _vertResolution /= 65536;
@@ -1122,7 +1141,14 @@ namespace AX::Media::MP4
         RegisterAtomFactory ( AtomType::kHVC1, [=] { return std::make_shared<FullAtom> ( AtomType::kHVC1 ); } );
         RegisterAtomFactory ( AtomType::kMP4A, [=] { return std::make_shared<MP4ASampleEntryAtom> ( AtomType::kMP4A ); } );
         RegisterAtomFactory ( AtomType::kAVC1, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kAVC1 ); } );
-        
+        RegisterAtomFactory ( AtomType::kRLE_, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kRLE_ ); } );
+        RegisterAtomFactory ( AtomType::kHAP1, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kHAP1 ); } );
+        RegisterAtomFactory ( AtomType::kHAP5, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kHAP5 ); } );
+        RegisterAtomFactory ( AtomType::kHAP7, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kHAP7 ); } );
+        RegisterAtomFactory ( AtomType::kHAPY, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kHAPY ); } );
+        RegisterAtomFactory ( AtomType::kHAPM, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kHAPM ); } );
+        RegisterAtomFactory ( AtomType::kJPEG, [=] { return std::make_shared<VideoSampleEntryAtom> ( AtomType::kJPEG ); } );
+
         // @Note(andrew): Early development but seem to be working
         RegisterAtomFactory ( AtomType::kMETA, [=] { return std::make_shared<METAAtom> ( ); } );
         RegisterAtomFactory ( AtomType::kILST, [=] { return std::make_shared<ILSTAtom> ( ); } );
@@ -1334,6 +1360,7 @@ namespace AX::Media::MP4
         _stsd = trak->FindFirstChildAs<STSDAtom> ( AtomType::kSTSD );
         _hdlr = trak->FindFirstChildAs<HDLRAtom> ( AtomType::kHDLR );
         _mdhd = trak->FindFirstChildAs<MDHDAtom> ( AtomType::kMDHD );
+        _stts = trak->FindFirstChildAs<STTSAtom> ( AtomType::kSTTS );
 
 		if ( !_hdlr.expired ( ) )
 		{
@@ -1404,16 +1431,56 @@ namespace AX::Media::MP4
 
         auto stsd = _stsd.lock ( );
         u32 handler = AX_FOURCC ( '?', '?', '?', '?' );
-        if ( stsd ) stsd->GetSampleDescription ( desc, handler );
-       
+        u8 depth{ 0 };
+        if ( stsd )
+        {
+            stsd->GetSampleDescription ( desc, handler );
+            switch ( Type ( ) )
+            {
+                case TrackType::kVideo:
+                {
+                    if ( auto vsd = stsd->FindFirstChildAs<VideoSampleEntryAtom> ( (AtomType)handler ) )
+                    {
+                        depth = vsd->Depth ( );
+                    }
+                    break;
+                }
+
+                default:
+                {
+                    break;
+                }
+            }
+        }
+
+        u32 timeScale = 1.0f;
+        if ( auto mdhd = _mdhd.lock ( ) ) timeScale = mdhd->TimeScale ( );
+        float absoluteTime = ( static_cast<float>( index ) / static_cast<float>( SampleCount ( ) ) * DurationSeconds() );
+
+        if ( auto stts = _stts.lock ( ) )
+        {
+            u64 totalDuration = 0;
+            for ( int i = 1; i <= index && i <= stts->GetEntryCount(); ++i ) 
+            {
+                STTSAtom::Entry entry;
+                if ( stts->GetEntry ( i, entry ) )
+                {
+                    totalDuration += entry.SampleDelta;
+                }
+            }
+
+            float fps = ( static_cast<float>( timeScale ) / static_cast<float>( totalDuration ) );
+            absoluteTime = static_cast<float>(index) / fps;
+        }
+
         if ( auto mdat = _mdat.lock ( ) )
         {
             if ( mdat->IsZeroCopy ( ) )
             {
-                sample = Sample ( handler, mdat->ZeroCopyDataWithOffset ( static_cast<off_t>( offset ) ), sampleSize, index, Size() );
+                sample = Sample ( handler, mdat->ZeroCopyDataWithOffset ( static_cast<off_t>( offset ) ), sampleSize, index, absoluteTime, Size(), depth );
             } else
             {
-                sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>( offset ), sampleSize ), index, Size() );
+                sample = Sample ( handler, mdat->DataWithOffset ( static_cast<off_t>( offset ), sampleSize ), index, absoluteTime, Size(), depth );
             }
             return true;
         }

@@ -287,6 +287,7 @@ namespace AX::Media::MKV
 		
 	{
 		RegisterElementFactory ( MatroskaElementId::kTrackEntry, [=]( const MatroskaIdentifier & id ) { return std::make_shared<TrackElement> ( id ); } );
+		RegisterElementFactory ( MatroskaElementId::kCluster, [=] ( const MatroskaIdentifier & id ) { return std::make_shared<ClusterElement> ( id ); } );
 	}
 
 	bool MKV::Load ( )
@@ -396,6 +397,11 @@ namespace AX::Media::MKV
 	{
 		auto success = MasterElement::Parse ( *this, stream, length );
 		auto tracks = FindChildren ( MatroskaElementId::kTrackEntry );
+
+		if ( auto element = FindFirstChild ( MatroskaElementId::kTimestampScale ) )
+		{
+			_timestampScale = static_cast<float>( element->Value<u64> ( ) );
+		}
 
 		for ( auto & track : tracks )
 		{
@@ -705,7 +711,7 @@ namespace AX::Media::MKV
 		{
 			_duration = static_cast<float>( element->Value<u64> ( ) / 1e9 );
 		}
-
+		
 		if ( auto element = FindFirstChild ( MatroskaElementId::kPixelWidth ) )
 		{
 			_width = static_cast<u32>(element->Value<u64> ( ));
@@ -732,26 +738,37 @@ namespace AX::Media::MKV
 
 	void TrackElement::CollectSamples ( MKV & container )
 	{
-		auto blocks = container.FindChildren ( MatroskaElementId::kSimpleBlock );
-		for ( auto & b : blocks )
+		auto clusters = container.FindChildren ( MatroskaElementId::kCluster );
+		for ( auto & c : clusters )
 		{
-			if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
+			if ( auto cluster = c->TryCast<ClusterElement> ( ) )
 			{
-				if ( block->TrackNumber ( ) == TrackNumber ( ) )
+				auto blocks = cluster->FindChildren ( MatroskaElementId::kSimpleBlock );
+				for ( auto & b : blocks )
 				{
-					_blocks.push_back ( block );
+					if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
+					{
+						if ( block->TrackNumber ( ) == TrackNumber ( ) )
+						{
+							const auto absoluteTime = static_cast<float> ( ( ( cluster->Timestamp ( ) + block->Timestamp ( ) ) * container.TimestampScale ( ) ) / 1e9 );
+							block->SetAbsoluteTimestampSeconds ( absoluteTime );
+							_blocks.push_back ( block );
+						}
+					}
 				}
-			}
-		}
 
-		blocks = container.FindChildren ( MatroskaElementId::kBlock );
-		for ( auto & b : blocks )
-		{
-			if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
-			{
-				if ( block->TrackNumber ( ) == TrackNumber ( ) )
+				blocks = cluster->FindChildren ( MatroskaElementId::kBlock );
+				for ( auto & b : blocks )
 				{
-					_blocks.push_back ( block );
+					if ( auto block = b->TryCast<SimpleBlockElement> ( ) )
+					{
+						if ( block->TrackNumber ( ) == TrackNumber ( ) )
+						{
+							const auto absoluteTime = static_cast<float> ( ( ( cluster->Timestamp ( ) + block->Timestamp ( ) ) * container.TimestampScale ( ) ) / 1e9 );
+							block->SetAbsoluteTimestampSeconds ( absoluteTime );
+							_blocks.push_back ( block );
+						}
+					}
 				}
 			}
 		}
@@ -765,20 +782,33 @@ namespace AX::Media::MKV
 
 	bool TrackElement::FillSample ( u32 index, Sample & sample )
 	{
+		// @TODO(andrew): Extract bit depth
 		if ( index < _blocks.size ( ) )
 		{
 			auto & block = _blocks[index];
 			if ( block->IsZeroCopy() )
 			{
-				sample = Sample ( _handler, block->ZeroCopyData(), static_cast<u32>(block->LengthInStream ( )), index, ivec2 ( _width, _height ) );
+				sample = Sample ( _handler, block->ZeroCopyData(), static_cast<u32>(block->LengthInStream ( )), index, block->AbsoluteTimestampSeconds ( ), ivec2 ( _width, _height ), 0 );
 			} else
 			{
-				sample = Sample ( _handler, block->Data ( ), index, ivec2 ( _width, _height ) );
+				sample = Sample ( _handler, block->Data ( ), index, block->AbsoluteTimestampSeconds ( ), ivec2 ( _width, _height ), 0 );
 			}
 			return true;
 		}
 
 		return false;
+	}
+
+	bool ClusterElement::Parse ( MKV & context, const ci::IStreamRef & stream, usz length )
+	{
+		bool result = MasterElement::Parse ( context, stream, length );
+
+		if ( auto timestamp = FindFirstChild ( MatroskaElementId::kTimestamp ) )
+		{
+			_timestamp = timestamp->Value<u64> ( );
+		}
+
+		return result;
 	}
 
 	bool SimpleBlockElement::Parse ( MKV & context, const IStreamRef & stream, usz length )
@@ -796,6 +826,9 @@ namespace AX::Media::MKV
 
 		stream->seekAbsolute ( static_cast<off_t>(position + size) );
 
+		// @TODO(andrew): Timestamps are usually relative to the parent Cluster
+		// We may need to read this here and then when accumulating samples, keep
+		// track of its position relative to the overall Cluster offset
 		stream->read ( &_timestamp );
 		u8 flags{};
 		stream->read ( &flags );
@@ -839,7 +872,7 @@ namespace AX::Media::MKV
 
 		return true;
 	}
-	
+
 	const u8 * SimpleBlockElement::ZeroCopyData ( ) const
 	{
 		if ( _ownsMemory )
